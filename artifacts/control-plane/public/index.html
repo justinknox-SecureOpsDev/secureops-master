@@ -35,10 +35,7 @@
             <div><strong>Fleet Control Plane</strong></div>
           </div>
           <div class="topbar-actions">
-            <label class="fleet-target">Fleet target version
-              <input id="fleet-target" type="text" placeholder="e.g. a1b2c3d" />
-            </label>
-            <button id="save-fleet-target" class="ghost">Save target</button>
+            <span id="master-build" class="muted small" title="Recorded automatically from the master build">Master build: loading…</span>
             <button id="poll-now" class="ghost">Poll now</button>
             <button id="add-customer" class="primary">Add customer</button>
             <button id="logout" class="ghost">Sign out</button>
@@ -58,8 +55,8 @@
                 <th>Setup</th>
                 <th>Agreements</th>
                 <th>Plan</th>
-                <th>Version</th>
-                <th>Target</th>
+                <th>Build status</th>
+                <th>Tenant build</th>
                 <th>Last seen</th>
                 <th></th>
               </tr>
@@ -115,7 +112,6 @@
             <label>Contact email<input id="c-contactEmail" type="email" /></label>
           </div>
           <div class="row">
-            <label>Target version (override)<input id="c-targetVersion" type="text" placeholder="optional" /></label>
             <label class="check"><input id="c-isActive" type="checkbox" checked /> Active</label>
           </div>
           <label>Lifecycle
@@ -143,6 +139,7 @@
     <div id="settings-modal" class="modal" hidden>
       <div class="modal-card wide">
         <h2 id="settings-title">Remote settings <span id="settings-lifecycle"></span></h2>
+          <div id="settings-build-status" class="build-detail"></div>
         <div id="settings-checklist" class="settings-checklist"></div>
         <div id="settings-body" class="settings-body">Loading…</div>
         <div id="settings-history" class="settings-history"></div>

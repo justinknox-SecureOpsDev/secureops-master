@@ -42,6 +42,8 @@
    ```
    Both repos share history from the fork, so this is an ordinary merge. If something goes wrong before you commit, `git merge --abort` puts everything back.
 
+   The backend build records the fetched `upstream/main` revision, not the customer's merge-commit SHA. That gives the Fleet Control Plane a common master revision to compare even when the merge creates a customer-specific commit.
+
 3. **Resolve `.replit` by hand — this is the one file that matters.** Keep the **customer's** `[userenv]`, `[userenv.shared]`, and `[userenv.production]` blocks; take the **master's** version of everything else (`[[workflows]]`, `[[ports]]`, `[nix]`, `[deployment]`), since those carry real infrastructure changes. After resolving, confirm the customer's own values survived:
    - `ORG_CODE` — their code, not `wcsgi`
    - `DEMO_ADMIN_EMAIL` / `SUPER_ADMIN_EMAILS` — their admin
@@ -63,12 +65,12 @@
 
 6. **Republish (Reserved VM).** This is what migrates their **production** database. Additive changes (new nullable columns, new columns with defaults, new indexes) apply safely. A schema change that adds a *unique constraint* to a table that already has rows can fail validation or force a destructive rewrite — check the release notes for the batch before publishing, and never run DDL at boot.
 
-7. **Verify against their live address:**
+7. **Verify against their live address and fleet status:**
    ```bash
    curl -s https://<their-address>/api/version      # build id should change
    curl -s https://<their-address>/api/brand        # still their name/colors
    ```
-   Then sign in to `https://<their-address>/admin-portal/`, confirm no amber "degraded configuration" banner, and spot-check whatever the batch added. A brand-new endpoint answering `401` instead of `404` is the quick proof it shipped.
+    Then sign in to `https://<their-address>/admin-portal/`, confirm no amber "degraded configuration" banner, and spot-check whatever the batch added. A brand-new endpoint answering `401` instead of `404` is the quick proof it shipped. In the master Fleet Control Plane, click **Poll now** and confirm the customer shows **up to date** against the automatically recorded master build. If it remains **behind**, the pull or republish did not reach the live backend; **never current** means it has not yet reported this master build.
 
 8. **Re-run the preflight** from a shell in the customer's repl:
    ```bash
@@ -91,4 +93,4 @@ If an update goes wrong in a customer repl, roll that repl back to its checkpoin
 ## Quick reference
 
 Master: merge work → `git push github main`.
-Customer: `git fetch upstream` → `git merge upstream/main` → keep their `.replit` env blocks → `pnpm install` → `db push` → typecheck/test → republish → verify `/api/version`.
+Customer: `git fetch upstream` → `git merge upstream/main` → keep their `.replit` env blocks → `pnpm install` → `db push` → typecheck/test → republish → verify `/api/version` → Fleet Control Plane says **up to date**.

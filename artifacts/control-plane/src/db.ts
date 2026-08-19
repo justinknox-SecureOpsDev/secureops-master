@@ -49,6 +49,8 @@ export async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS control_plane_settings (
       id             TEXT PRIMARY KEY DEFAULT 'singleton',
       target_version TEXT,
+      master_version TEXT,
+      master_recorded_at TIMESTAMPTZ,
       updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
@@ -57,6 +59,14 @@ export async function ensureSchema(): Promise<void> {
     INSERT INTO control_plane_settings (id) VALUES ('singleton')
     ON CONFLICT (id) DO NOTHING;
   `);
+  // Existing control-plane databases already have this table, so add the
+  // automatic reference fields independently of CREATE TABLE above.
+  await pool.query(
+    `ALTER TABLE control_plane_settings ADD COLUMN IF NOT EXISTS master_version TEXT;`,
+  );
+  await pool.query(
+    `ALTER TABLE control_plane_settings ADD COLUMN IF NOT EXISTS master_recorded_at TIMESTAMPTZ;`,
+  );
 
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_cp_customers_org_code ON control_plane_customers (org_code);`,
@@ -84,6 +94,13 @@ export async function ensureSchema(): Promise<void> {
   );
   await pool.query(
     `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ;`,
+  );
+
+  // Last time this tenant reported the current master build. It is deliberately
+  // retained while the tenant is behind/offline, giving operators a useful
+  // "last known current" timestamp instead of merely the latest probe time.
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS last_current_at TIMESTAMPTZ;`,
   );
 
   // Audit trail of remote brand/feature changes pushed to customer backends.
@@ -305,6 +322,7 @@ export interface CustomerRow {
   target_version: string | null;
   reported_version: string | null;
   reported_built_at: string | null;
+  last_current_at: Date | null;
   last_status: string;
   last_latency_ms: number | null;
   last_seen_at: Date | null;

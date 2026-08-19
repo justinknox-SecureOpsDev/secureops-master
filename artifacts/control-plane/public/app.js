@@ -171,6 +171,46 @@ function statusBadge(c) {
   return '<span class="badge ' + (c.isActive ? cls : "warn") + '">' + label + "</span>";
 }
 
+function buildStatusCell(c) {
+  if (c.versionStatus === "current") {
+    var currentTip = "Matches master " + (c.masterVersion || "build") +
+      (c.lastCurrentAt ? " · last confirmed " + fmtDate(c.lastCurrentAt) : "");
+    return "<span class='badge ok' title='" + esc(currentTip) + "'>up to date</span>";
+  }
+  if (c.versionStatus === "behind") {
+    var behindTip = "Tenant " + (c.reportedVersion || "build") + " differs from master " +
+      (c.masterVersion || "build") + ". " +
+      (c.lastCurrentAt
+        ? "Last seen current " + fmtDate(c.lastCurrentAt)
+        : "Never seen on the current master build.");
+    return "<span class='badge bad' title='" + esc(behindTip) + "'>behind</span>" +
+      (c.lastCurrentAt
+        ? "<br><span class='muted small'>current " + esc(relativeAge(c.lastCurrentAt) || fmtDate(c.lastCurrentAt)) + "</span>"
+        : "<br><span class='muted small'>never current</span>");
+  }
+  var unknownTip = !c.masterVersion
+    ? "Master build has not been recorded yet"
+    : c.lastStatus === "online"
+      ? "This backend does not report /api/version"
+      : "Backend is unreachable; build status cannot be checked";
+  return "<span class='badge warn' title='" + esc(unknownTip) + "'>unknown</span>";
+}
+
+function buildStatusDetails(c) {
+  var lastCurrent = c.lastCurrentAt
+    ? fmtDate(c.lastCurrentAt)
+    : c.versionStatus === "behind"
+      ? "Never observed on the current master build"
+      : "Not yet recorded";
+  return "<p><strong>Build status:</strong> " + buildStatusCell(c) + "</p>" +
+    "<p class='small'><span class='muted'>Tenant build:</span> <code>" +
+    esc(c.reportedVersion || "unknown") + "</code> &nbsp; " +
+    "<span class='muted'>Master build:</span> <code>" +
+    esc(c.masterVersion || "not recorded") + "</code></p>" +
+    "<p class='small'><span class='muted'>Last seen current:</span> " +
+    esc(lastCurrent) + "</p>";
+}
+
 // Trial/Paid billing lifecycle badge. "Paid" shows the conversion date in its
 // tooltip; "Trial" has no timestamp (never converted, or reverted).
 function lifecycleBadge(c) {
@@ -376,9 +416,6 @@ function renderFleet() {
   $("empty").hidden = visible.length > 0;
   visible.forEach(function (c) {
     const tr = document.createElement("tr");
-    const versionCell =
-      esc(c.reportedVersion || "—") +
-      (c.needsUpdate ? ' <span class="badge bad">update</span>' : "");
     tr.innerHTML =
       "<td><strong>" + esc(c.name) + "</strong><br><span class='muted small'>" + esc(c.contactEmail || "") + "</span></td>" +
       "<td><code>" + esc(c.orgCode) + "</code></td>" +
@@ -388,8 +425,8 @@ function renderFleet() {
       "<td class='setup-cell small'>" + setupProgressCell(c) + "</td>" +
       "<td class='small'>" + agreementsCell(c) + "</td>" +
       "<td class='small'>" + planCell(c) + "</td>" +
-      "<td class='small'>" + versionCell + "</td>" +
-      "<td class='small'>" + esc(c.effectiveTargetVersion || "—") + "</td>" +
+      "<td class='small'>" + buildStatusCell(c) + "</td>" +
+      "<td class='small'><code>" + esc(c.reportedVersion || "—") + "</code></td>" +
       "<td class='small'>" + fmtDate(c.lastSeenAt) + "</td>" +
       "<td class='actions'></td>";
     const actions = tr.querySelector(".actions");
@@ -432,7 +469,14 @@ async function loadFleet() {
   renderFleet();
   populateActivityCustomers();
   const s = await api("/settings");
-  $("fleet-target").value = s.targetVersion || "";
+  var masterBuild = $("master-build");
+  if (masterBuild) {
+    masterBuild.textContent = "Master build: " + (s.masterVersion || "not recorded") +
+      (s.masterRecordedAt ? " · recorded " + relativeAge(s.masterRecordedAt) : "");
+    masterBuild.title = s.masterRecordedAt
+      ? "Recorded automatically from the master build at " + fmtDate(s.masterRecordedAt)
+      : "Master build has not been recorded yet";
+  }
   await loadActivity();
 }
 
@@ -561,7 +605,6 @@ function openEditor(c) {
   $("c-apiBaseUrl").value = c ? c.apiBaseUrl : "";
   $("c-contactName").value = c ? c.contactName || "" : "";
   $("c-contactEmail").value = c ? c.contactEmail || "" : "";
-  $("c-targetVersion").value = c ? c.targetVersion || "" : "";
   $("c-isActive").checked = c ? c.isActive : true;
   $("c-lifecycleStatus").value = c ? (c.lifecycleStatus || "trial") : "trial";
   $("c-mgmtSecret").value = "";
@@ -589,7 +632,6 @@ async function submitCustomer(e) {
     apiBaseUrl: $("c-apiBaseUrl").value.trim(),
     contactName: $("c-contactName").value.trim(),
     contactEmail: $("c-contactEmail").value.trim(),
-    targetVersion: $("c-targetVersion").value.trim(),
     isActive: $("c-isActive").checked,
     notes: $("c-notes").value.trim(),
   };
@@ -777,6 +819,7 @@ async function openSettings(c) {
   var myGen = ++settingsGeneration;
   $("settings-title").childNodes[0].textContent = "Remote settings \u2014 " + c.name + " ";
   $("settings-lifecycle").innerHTML = lifecycleBadge(c);
+  $("settings-build-status").innerHTML = buildStatusDetails(c);
   $("settings-body").innerHTML = "Loading\u2026";
   $("settings-checklist").innerHTML = "";
   $("settings-modal").hidden = false;
@@ -1250,15 +1293,6 @@ async function init() {
     await loadFleet();
     toast("Fleet refreshed");
   });
-  $("save-fleet-target").addEventListener("click", async function () {
-    await api("/settings", {
-      method: "PUT",
-      body: JSON.stringify({ targetVersion: $("fleet-target").value.trim() }),
-    });
-    await loadFleet();
-    toast("Fleet target saved");
-  });
-
   if (token()) {
     try {
       showDash();

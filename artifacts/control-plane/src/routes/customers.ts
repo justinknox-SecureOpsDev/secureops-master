@@ -30,7 +30,6 @@ const baseFields = {
   contactName: z.string().trim().max(200).optional().nullable(),
   contactEmail: z.string().trim().email().max(200).optional().or(z.literal("")).nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
-  targetVersion: z.string().trim().max(200).optional().nullable(),
   mgmtSecret: z.string().max(500).optional().nullable(),
   isActive: z.boolean().optional(),
 };
@@ -51,17 +50,36 @@ const updateSchema = z.object({
   contactName: baseFields.contactName,
   contactEmail: baseFields.contactEmail,
   notes: baseFields.notes,
-  targetVersion: baseFields.targetVersion,
   mgmtSecret: baseFields.mgmtSecret,
   isActive: baseFields.isActive,
   lifecycleStatus: lifecycleStatusSchema.optional(),
 });
 
-async function fleetTargetVersion(): Promise<string | null> {
-  const { rows } = await pool.query<{ target_version: string | null }>(
-    `SELECT target_version FROM control_plane_settings WHERE id = 'singleton'`,
+interface FleetReference {
+  masterVersion: string | null;
+  recordedAt: Date | null;
+}
+
+async function fleetReference(): Promise<FleetReference> {
+  const { rows } = await pool.query<{ master_version: string | null; master_recorded_at: Date | null }>(
+    `SELECT master_version, master_recorded_at FROM control_plane_settings WHERE id = 'singleton'`,
   );
-  return rows[0]?.target_version ?? null;
+  return {
+    masterVersion: rows[0]?.master_version ?? null,
+    recordedAt: rows[0]?.master_recorded_at ?? null,
+  };
+}
+
+export type VersionStatus = "current" | "behind" | "unknown";
+
+export function versionStatus(
+  reportedVersion: string | null,
+  masterVersion: string | null,
+  lastStatus: string,
+): VersionStatus {
+  if (lastStatus !== "online") return "unknown";
+  if (!reportedVersion || !masterVersion) return "unknown";
+  return reportedVersion === masterVersion ? "current" : "behind";
 }
 
 /** Parse the stored agreements snapshot; malformed/missing JSON → null. */
@@ -135,13 +153,10 @@ async function allChecklistProgress(): Promise<Map<string, { done: number; total
 
 function serialize(
   row: CustomerRow,
-  fleetTarget: string | null,
+  reference: FleetReference,
   checklistProgress?: { done: number; total: number },
 ) {
-  const effectiveTarget = row.target_version ?? fleetTarget;
-  const needsUpdate = Boolean(
-    effectiveTarget && row.reported_version && row.reported_version !== effectiveTarget,
-  );
+  const status = versionStatus(row.reported_version, reference.masterVersion, row.last_status);
   return {
     id: row.id,
     orgCode: row.org_code,
@@ -150,10 +165,11 @@ function serialize(
     contactName: row.contact_name,
     contactEmail: row.contact_email,
     notes: row.notes,
-    targetVersion: row.target_version,
-    effectiveTargetVersion: effectiveTarget,
+    masterVersion: reference.masterVersion,
+    masterRecordedAt: reference.recordedAt,
     reportedVersion: row.reported_version,
     reportedBuiltAt: row.reported_built_at,
+    lastCurrentAt: row.last_current_at,
     lastStatus: row.last_status,
     lastLatencyMs: row.last_latency_ms,
     lastSeenAt: row.last_seen_at,
@@ -164,7 +180,8 @@ function serialize(
     plan: parseCustomerPlan(row.customer_config_json),
     lifecycleStatus: row.lifecycle_status,
     convertedAt: row.converted_at,
-    needsUpdate,
+    versionStatus: status,
+    needsUpdate: status === "behind",
     checklistProgress: checklistProgress ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -172,14 +189,14 @@ function serialize(
 }
 
 customersRouter.get("/customers", async (_req, res) => {
-  const [fleetTarget, progress] = await Promise.all([
-    fleetTargetVersion(),
+  const [reference, progress] = await Promise.all([
+    fleetReference(),
     allChecklistProgress(),
   ]);
   const { rows } = await pool.query<CustomerRow>(
     `SELECT * FROM control_plane_customers ORDER BY name ASC`,
   );
-  res.json({ customers: rows.map((r) => serialize(r, fleetTarget, progress.get(r.id))) });
+  res.json({ customers: rows.map((r) => serialize(r, reference, progress.get(r.id))) });
 });
 
 customersRouter.post("/customers", async (req, res) => {
@@ -211,8 +228,8 @@ customersRouter.post("/customers", async (req, res) => {
     await client.query("BEGIN");
     const { rows } = await client.query<CustomerRow>(
       `INSERT INTO control_plane_customers
-         (id, org_code, name, api_base_url, contact_name, contact_email, notes, target_version, mgmt_secret_enc, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10, TRUE))
+          (id, org_code, name, api_base_url, contact_name, contact_email, notes, mgmt_secret_enc, is_active)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, TRUE))
        RETURNING *`,
       [
         id,
@@ -222,7 +239,6 @@ customersRouter.post("/customers", async (req, res) => {
         d.contactName ?? null,
         d.contactEmail || null,
         d.notes ?? null,
-        d.targetVersion || null,
         mgmtSecretEnc,
         d.isActive ?? null,
       ],
@@ -234,11 +250,11 @@ customersRouter.post("/customers", async (req, res) => {
     await restoreChecklistFromArchive(rows[0].id, orgCode, client);
     await client.query("COMMIT");
 
-    const [fleetTarget, progress] = await Promise.all([
-      fleetTargetVersion(),
+    const [reference, progress] = await Promise.all([
+      fleetReference(),
       allChecklistProgress(),
     ]);
-    res.status(201).json({ customer: serialize(rows[0], fleetTarget, progress.get(rows[0].id)) });
+    res.status(201).json({ customer: serialize(rows[0], reference, progress.get(rows[0].id)) });
   } catch (err) {
     await client.query("ROLLBACK");
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505") {
@@ -286,7 +302,6 @@ customersRouter.put("/customers/:id", async (req, res) => {
   if (d.contactName !== undefined) push("contact_name", d.contactName ?? null);
   if (d.contactEmail !== undefined) push("contact_email", d.contactEmail || null);
   if (d.notes !== undefined) push("notes", d.notes ?? null);
-  if (d.targetVersion !== undefined) push("target_version", d.targetVersion || null);
   if (d.isActive !== undefined) push("is_active", d.isActive);
   if (d.mgmtSecret !== undefined) {
     const trimmed = (d.mgmtSecret ?? "").trim();
@@ -328,11 +343,11 @@ customersRouter.put("/customers/:id", async (req, res) => {
       res.status(404).json({ error: "Customer not found" });
       return;
     }
-    const [fleetTarget, progress] = await Promise.all([
-      fleetTargetVersion(),
+    const [reference, progress] = await Promise.all([
+      fleetReference(),
       allChecklistProgress(),
     ]);
-    res.json({ customer: serialize(rows[0], fleetTarget, progress.get(rows[0].id)) });
+    res.json({ customer: serialize(rows[0], reference, progress.get(rows[0].id)) });
   } catch (err) {
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505") {
       res.status(409).json({ error: "An org code must be unique" });
@@ -450,24 +465,11 @@ customersRouter.post("/customers/poll", async (_req, res) => {
   res.json({ ok: true });
 });
 
-// Fleet-wide settings (default target version).
+// Fleet build reference is recorded automatically from the master checkout.
 customersRouter.get("/settings", async (_req, res) => {
-  res.json({ targetVersion: await fleetTargetVersion() });
-});
-
-const fleetSettingsSchema = z.object({
-  targetVersion: z.string().trim().max(200).optional().nullable(),
-});
-
-customersRouter.put("/settings", async (req, res) => {
-  const parsed = fleetSettingsSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid settings" });
-    return;
-  }
-  await pool.query(
-    `UPDATE control_plane_settings SET target_version = $1, updated_at = now() WHERE id = 'singleton'`,
-    [parsed.data.targetVersion || null],
-  );
-  res.json({ targetVersion: parsed.data.targetVersion || null });
+  const reference = await fleetReference();
+  res.json({
+    masterVersion: reference.masterVersion,
+    masterRecordedAt: reference.recordedAt,
+  });
 });

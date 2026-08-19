@@ -9,12 +9,26 @@
  *     (null) version, NOT a false "offline".
  */
 
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { fetchAgreementsSnapshot, fetchCustomerConfigSnapshot, probeBackend } from "../poller";
+import {
+  fetchAgreementsSnapshot,
+  fetchCustomerConfigSnapshot,
+  pollCustomer,
+  probeBackend,
+} from "../poller";
+import { pool } from "../db";
+import { versionStatus } from "../routes/customers";
 
 const realFetch = globalThis.fetch;
-afterEach(() => {
+const customerIds: string[] = [];
+afterEach(async () => {
   globalThis.fetch = realFetch;
+  if (customerIds.length > 0) {
+    await pool.query(`DELETE FROM control_plane_customers WHERE id = ANY($1::text[])`, [
+      customerIds.splice(0),
+    ]);
+  }
 });
 
 function res(status: number, body?: unknown): Response {
@@ -82,6 +96,108 @@ describe("probeBackend", () => {
     expect(r.status).toBe("offline");
     expect(r.lastError).toBe("fetch failed");
     expect(r.seen).toBe(false);
+  });
+});
+
+describe("pollCustomer build freshness persistence", () => {
+  async function createCustomer() {
+    const id = randomUUID();
+    customerIds.push(id);
+    const apiBaseUrl = `https://${id}.example.test`;
+    await pool.query(
+      `INSERT INTO control_plane_customers (id, org_code, name, api_base_url)
+       VALUES ($1, $2, 'Poll test', $3)`,
+      [id, `poll-${id}`, apiBaseUrl],
+    );
+    return { id, api_base_url: apiBaseUrl, mgmt_secret_enc: null };
+  }
+
+  it("records and retains when a customer was last observed on the master build", async () => {
+    const customer = await createCustomer();
+    route({ version: res(200, { version: "master1", builtAt: "2026-08-19T00:00:00Z" }) });
+    await pollCustomer(customer, "master1");
+
+    const first = await pool.query<{
+      reported_version: string | null;
+      last_status: string;
+      last_current_at: Date | null;
+    }>(
+      `SELECT reported_version, last_status, last_current_at
+       FROM control_plane_customers WHERE id = $1`,
+      [customer.id],
+    );
+    expect(first.rows[0].reported_version).toBe("master1");
+    expect(first.rows[0].last_status).toBe("online");
+    expect(first.rows[0].last_current_at).toBeInstanceOf(Date);
+
+    route({ version: res(200, { version: "older1", builtAt: "2026-08-01T00:00:00Z" }) });
+    await pollCustomer(customer, "master1");
+    const behind = await pool.query<{
+      reported_version: string | null;
+      last_status: string;
+      last_current_at: Date | null;
+    }>(
+      `SELECT reported_version, last_status, last_current_at
+       FROM control_plane_customers WHERE id = $1`,
+      [customer.id],
+    );
+    expect(versionStatus(
+      behind.rows[0].reported_version,
+      "master1",
+      behind.rows[0].last_status,
+    )).toBe("behind");
+    expect(behind.rows[0].last_current_at?.toISOString()).toBe(
+      first.rows[0].last_current_at?.toISOString(),
+    );
+  });
+
+  it("makes the latest build status unknown when a prior current backend is offline", async () => {
+    const customer = await createCustomer();
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+
+    route({ version: new Error("fetch failed") });
+    await pollCustomer(customer, "master1");
+    const { rows } = await pool.query<{
+      reported_version: string | null;
+      last_status: string;
+      last_current_at: Date | null;
+    }>(
+      `SELECT reported_version, last_status, last_current_at
+       FROM control_plane_customers WHERE id = $1`,
+      [customer.id],
+    );
+    expect(rows[0].reported_version).toBe("master1");
+    expect(rows[0].last_current_at).toBeInstanceOf(Date);
+    expect(versionStatus(rows[0].reported_version, "master1", rows[0].last_status)).toBe(
+      "unknown",
+    );
+  });
+
+  it("clears a stale reported build when a reachable legacy backend cannot report one", async () => {
+    const customer = await createCustomer();
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+
+    route({ version: res(404), healthz: res(200, { status: "ok" }) });
+    await pollCustomer(customer, "master1");
+    const { rows } = await pool.query<{
+      reported_version: string | null;
+      reported_built_at: string | null;
+      last_status: string;
+      last_current_at: Date | null;
+    }>(
+      `SELECT reported_version, reported_built_at, last_status, last_current_at
+       FROM control_plane_customers WHERE id = $1`,
+      [customer.id],
+    );
+    expect(rows[0].last_status).toBe("online");
+    expect(rows[0].reported_version).toBeNull();
+    expect(rows[0].reported_built_at).toBeNull();
+    expect(rows[0].last_current_at).toBeInstanceOf(Date);
+    expect(versionStatus(rows[0].reported_version, "master1", rows[0].last_status)).toBe(
+      "unknown",
+    );
   });
 });
 

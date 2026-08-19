@@ -6,7 +6,7 @@
  * dashboard reads these columns to show online/offline + "needs update".
  */
 
-import { POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from "./config";
+import { MASTER_BUILD_VERSION, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from "./config";
 import { pool, type CustomerRow } from "./db";
 import { decryptSecret } from "./crypto";
 import { callCustomerControlPlane } from "./hmacClient";
@@ -174,7 +174,10 @@ export async function fetchCustomerConfigSnapshot(
 
 type PollRow = Pick<CustomerRow, "id" | "api_base_url" | "mgmt_secret_enc">;
 
-async function pollOne(row: PollRow): Promise<void> {
+export async function pollCustomer(
+  row: PollRow,
+  masterVersion: string | null,
+): Promise<void> {
   const { status, latency, version, builtAt, lastError, seen } = await probeBackend(
     row.api_base_url,
   );
@@ -197,11 +200,15 @@ async function pollOne(row: PollRow): Promise<void> {
        SET last_status = $2,
            last_latency_ms = $3,
            last_error = $4,
-           reported_version = COALESCE($5, reported_version),
-           reported_built_at = COALESCE($6, reported_built_at),
+            reported_version = CASE WHEN $7 THEN $5 ELSE reported_version END,
+            reported_built_at = CASE WHEN $7 THEN $6 ELSE reported_built_at END,
            last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END,
-           agreements_json = CASE WHEN $8 THEN $9 ELSE agreements_json END,
-           customer_config_json = CASE WHEN $10 THEN $11 ELSE customer_config_json END,
+            last_current_at = CASE
+              WHEN $5 IS NOT NULL AND $5 = $8 THEN now()
+              ELSE last_current_at
+            END,
+            agreements_json = CASE WHEN $9 THEN $10 ELSE agreements_json END,
+            customer_config_json = CASE WHEN $11 THEN $12 ELSE customer_config_json END,
            updated_at = now()
      WHERE id = $1`,
     [
@@ -212,6 +219,7 @@ async function pollOne(row: PollRow): Promise<void> {
       version,
       builtAt,
       seen,
+      masterVersion,
       agreements !== undefined,
       agreements ?? null,
       customerConfig !== undefined,
@@ -221,10 +229,27 @@ async function pollOne(row: PollRow): Promise<void> {
 }
 
 export async function pollAllOnce(): Promise<void> {
+  // The reference is recorded in the registry automatically with every poll.
+  // Do not replace a known reference with "unknown" in source archives where
+  // Git metadata was unavailable at build time.
+  const masterVersion = MASTER_BUILD_VERSION !== "unknown" ? MASTER_BUILD_VERSION : null;
+  if (masterVersion) {
+    await pool.query(
+      `UPDATE control_plane_settings
+       SET master_recorded_at = CASE
+             WHEN master_version IS DISTINCT FROM $1 THEN now()
+             ELSE master_recorded_at
+           END,
+           master_version = $1,
+           updated_at = now()
+       WHERE id = 'singleton'`,
+      [masterVersion],
+    );
+  }
   const { rows } = await pool.query<PollRow>(
     `SELECT id, api_base_url, mgmt_secret_enc FROM control_plane_customers WHERE is_active = TRUE`,
   );
-  await Promise.allSettled(rows.map((r) => pollOne(r)));
+  await Promise.allSettled(rows.map((r) => pollCustomer(r, masterVersion)));
 }
 
 export function startPoller(): void {

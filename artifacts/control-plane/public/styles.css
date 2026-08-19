@@ -70,8 +70,6 @@ button:hover { filter: brightness(1.08); }
   background: rgba(10,15,30,.6); position: sticky; top: 0; backdrop-filter: blur(6px);
 }
 .topbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.fleet-target { flex-direction: row; align-items: center; gap: 7px; font-size: 12px; }
-.fleet-target input { width: 130px; padding: 6px 9px; }
 
 main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 
@@ -127,6 +125,14 @@ td.actions { display: flex; gap: 6px; justify-content: flex-end; }
 .check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
 
 .settings-checklist { margin-bottom: 4px; }
+.build-detail {
+  margin: 8px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+.build-detail p { margin: 3px 0; }
 .settings-checklist h3 { margin: 0 0 8px; font-size: 14px; color: var(--gold); }
 .settings-body h3 { margin: 16px 0 8px; font-size: 14px; color: var(--gold); }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

@@ -14,6 +14,17 @@ export const IS_PROD = NODE_ENV === "production";
 
 export const PORT = Number.parseInt(process.env.PORT ?? "9999", 10);
 
+/**
+ * The master API build this control-plane deployment was shipped alongside.
+ * `build.mjs` injects the Git SHA (or explicit BUILD_VERSION) at build time,
+ * matching the identity returned by a current customer `/api/version`.
+ */
+declare const __MASTER_BUILD_VERSION__: string;
+export const MASTER_BUILD_VERSION =
+  (typeof __MASTER_BUILD_VERSION__ !== "undefined" && __MASTER_BUILD_VERSION__) ||
+  process.env.BUILD_VERSION ||
+  "unknown";
+
 /** Own registry DB; falls back to the shared DATABASE_URL for local dev. */
 export const DATABASE_URL =
   process.env.CONTROL_PLANE_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim() || "";

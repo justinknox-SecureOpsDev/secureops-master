@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
+import { resolveBuildVersion } from "./buildVersion.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -13,23 +13,20 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Build identity injected into the bundle so the control plane (and uptime
 // monitors) can read which version each customer is running. Non-sensitive.
-// Resolution order: explicit env (CI may set BUILD_VERSION) → short git SHA →
-// "unknown" when git isn't available (e.g. a source tarball with no .git).
-function resolveBuildVersion() {
-  if (process.env.BUILD_VERSION) return process.env.BUILD_VERSION;
-  try {
-    return execSync("git rev-parse --short HEAD", {
-      cwd: artifactDir,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-  } catch {
-    return "unknown";
-  }
-}
+// Resolution order:
+//   1. explicit env (CI may set BUILD_VERSION);
+//   2. refs/remotes/upstream/main in customer forks;
+//   3. the checkout's own HEAD in the master project;
+//   4. "unknown" when git isn't available.
+//
+// A customer's documented update flow uses `git merge upstream/main`, which
+// usually creates a customer-specific merge commit. Reporting that merge HEAD
+// would never equal the master's HEAD even when all master code is present.
+// The fetched upstream/main ref is the shared immutable identity both sides can
+// compare. buildVersion.mjs also proves that ref is an ancestor of HEAD, so a
+// fetch without a merge cannot make stale customer code look current.
 
-const BUILD_VERSION = resolveBuildVersion();
+const BUILD_VERSION = resolveBuildVersion(artifactDir);
 const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
 
 async function buildAll() {

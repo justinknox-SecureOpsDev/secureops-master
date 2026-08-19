@@ -24,6 +24,7 @@ import {
   summarizeAgreementRemoval,
 } from "../routes/remoteSettings";
 import { OPERATOR_EMAIL, OPERATOR_PASSWORD } from "../config";
+import { versionStatus } from "../routes/customers";
 
 describe("HMAC signing", () => {
   it("is deterministic hex HMAC-SHA256 over the payload", () => {
@@ -254,5 +255,21 @@ describe("operator credentials", () => {
   it("rejects a wrong password or email", () => {
     expect(verifyOperatorCredentials(OPERATOR_EMAIL, "wrong")).toBe(false);
     expect(verifyOperatorCredentials("intruder@example.com", OPERATOR_PASSWORD)).toBe(false);
+  });
+});
+
+describe("fleet build freshness", () => {
+  it("marks matching tenant and master builds as current", () => {
+    expect(versionStatus("abc1234", "abc1234", "online")).toBe("current");
+  });
+
+  it("marks a reported build that differs from master as behind", () => {
+    expect(versionStatus("old5678", "abc1234", "online")).toBe("behind");
+  });
+
+  it("keeps legacy, unreachable, and not-yet-recorded builds unknown", () => {
+    expect(versionStatus(null, "abc1234", "online")).toBe("unknown");
+    expect(versionStatus("abc1234", null, "online")).toBe("unknown");
+    expect(versionStatus("abc1234", "abc1234", "offline")).toBe("unknown");
   });
 });

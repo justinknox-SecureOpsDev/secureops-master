@@ -61,7 +61,12 @@ function makeEl(tag = ""): FakeEl {
   };
 }
 
-function renderWith(customersData: unknown[]): { created: FakeEl[]; esc: (s: unknown) => string; renderFiltered: (arr: unknown[], filter: string | null) => void } {
+function renderWith(customersData: unknown[]): {
+  created: FakeEl[];
+  esc: (s: unknown) => string;
+  buildDetails: (customer: unknown) => string;
+  renderFiltered: (arr: unknown[], filter: string | null) => void;
+} {
   const created: FakeEl[] = [];
   const elements: Record<string, FakeEl> = {};
   const documentStub = {
@@ -89,10 +94,14 @@ function renderWith(customersData: unknown[]): { created: FakeEl[]; esc: (s: unk
   const augmented =
     appJsSource +
     "\n;globalThis.__renderFleetWith = function (arr, filter) { customers = arr; fleetFilter = filter || null; renderFleet(); };" +
-    "\n;globalThis.__esc = esc;";
+    "\n;globalThis.__esc = esc;" +
+    "\n;globalThis.__buildStatusDetails = buildStatusDetails;";
   vm.runInContext(augmented, sandbox);
   (sandbox.__renderFleetWith as (a: unknown[], f?: string | null) => void)(customersData);
-  return { created, esc: sandbox.__esc as (s: unknown) => string,
+  return {
+    created,
+    esc: sandbox.__esc as (s: unknown) => string,
+    buildDetails: sandbox.__buildStatusDetails as (customer: unknown) => string,
     renderFiltered: (arr: unknown[], filter: string | null) =>
       (sandbox.__renderFleetWith as (a: unknown[], f: string | null) => void)(arr, filter),
   };
@@ -107,7 +116,7 @@ const baseCustomer = {
   lastStatus: "online",
   isActive: true,
   lastSeenAt: null,
-  effectiveTargetVersion: null,
+  versionStatus: "unknown",
 };
 
 describe("operator console escaping", () => {
@@ -141,6 +150,53 @@ describe("operator console escaping", () => {
   it("esc neutralizes angle brackets, quotes and ampersands", () => {
     const { esc } = renderWith([]);
     expect(esc("<script>\"'&")).toBe("&lt;script&gt;&quot;&#39;&amp;");
+  });
+});
+
+describe("fleet build status rendering", () => {
+  it("shows a clear behind warning when the tenant was never current", () => {
+    const { created } = renderWith([
+      {
+        ...baseCustomer,
+        reportedVersion: "old5678",
+        masterVersion: "abc1234",
+        versionStatus: "behind",
+        lastCurrentAt: null,
+      },
+    ]);
+    const tr = created.find((e) => e.tag === "tr");
+    expect(tr!.innerHTML).toContain("behind");
+    expect(tr!.innerHTML).toContain("never current");
+  });
+
+  it("shows current status with its last confirmation timestamp", () => {
+    const { created } = renderWith([
+      {
+        ...baseCustomer,
+        reportedVersion: "abc1234",
+        masterVersion: "abc1234",
+        versionStatus: "current",
+        lastCurrentAt: "2026-08-19T12:00:00.000Z",
+      },
+    ]);
+    const tr = created.find((e) => e.tag === "tr");
+    expect(tr!.innerHTML).toContain("up to date");
+    expect(tr!.innerHTML).toContain("last confirmed");
+  });
+
+  it("shows last-seen-current history in the customer detail summary", () => {
+    const { buildDetails } = renderWith([]);
+    const html = buildDetails({
+      ...baseCustomer,
+      reportedVersion: "old5678",
+      masterVersion: "abc1234",
+      versionStatus: "behind",
+      lastCurrentAt: "2026-08-01T10:00:00.000Z",
+    });
+    expect(html).toContain("Last seen current:");
+    expect(html).toContain("old5678");
+    expect(html).toContain("abc1234");
+    expect(html).not.toContain("Never observed");
   });
 });
 
@@ -265,7 +321,6 @@ describe("renderSummary — setup stat cards (trial-scoped)", () => {
     lastStatus: "online",
     isActive: true,
     lastSeenAt: null,
-    effectiveTargetVersion: null,
     agreements: null,
     hasMgmtSecret: false,
     plan: null,
