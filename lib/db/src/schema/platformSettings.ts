@@ -45,6 +45,10 @@ export const platformCustomerConfigTable = pgTable("platform_customer_config", {
   // TIME_CONFIRM_EDIT_WINDOW_HOURS env var, then a 2h default. See
   // artifacts/api-server/src/lib/confirmEditWindowConfig.ts.
   timeConfirmEditWindowHours: text("time_confirm_edit_window_hours"),
+  // Default wait after a shift's scheduled end before an abandoned time entry
+  // is auto-closed. A site's own auto_clock_out_delay_minutes wins; null here
+  // preserves the historical 10-minute fallback. See scheduledJobs.ts.
+  autoClockOutDelayMinutes: integer("auto_clock_out_delay_minutes"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   updatedBy: text("updated_by"),
 });

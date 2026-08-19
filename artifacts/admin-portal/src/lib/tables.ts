@@ -417,11 +417,11 @@ export const TABLES: TableDescriptor[] = [
       },
       {
         key: "autoClockOutDelayMinutes",
-        label: "Auto clock-out delay (minutes) — leave blank for 10",
+        label: "Auto clock-out delay (minutes) — leave blank for company default",
         type: "integer",
         hiddenInGrid: true,
         placeholder: "e.g. 45 for an event post",
-        helpText: "How long past the scheduled shift end the system waits before closing an abandoned entry, if the officer can't be confirmed inside the geofence. Blank uses the 10-minute default; max 720 (12h).",
+        helpText: "How long past the scheduled shift end the system waits before closing an abandoned entry, if the officer can't be confirmed inside the geofence. Blank uses the company default (10 minutes if that is also blank); max 720 (12h).",
       },
       {
         key: "autoClockOutPayGrace",

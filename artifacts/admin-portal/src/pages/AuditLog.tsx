@@ -77,6 +77,8 @@ function formatSettingValue(kind: string, v: unknown): string {
   switch (kind) {
     case "hours":
       return formatHours(v);
+    case "minutes":
+      return `${v} min`;
     case "money_cents": {
       const n = typeof v === "number" ? v : parseFloat(String(v));
       if (!Number.isFinite(n)) return String(v);

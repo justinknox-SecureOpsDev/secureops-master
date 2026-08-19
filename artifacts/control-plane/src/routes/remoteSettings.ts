@@ -75,6 +75,10 @@ export function summarizePlanBilling(body: unknown): string {
     const w = b.timeConfirmEditWindowHours;
     parts.push(w ? "time-edit " + String(w) + "h" : "time-edit default");
   }
+  if (has("autoClockOutDelayMinutes")) {
+    const delay = b.autoClockOutDelayMinutes;
+    parts.push(delay == null ? "auto clock-out default" : "auto clock-out " + String(delay) + "m");
+  }
   if (has("planStartDate") && b.planStartDate) parts.push("start " + String(b.planStartDate));
   if (has("customerName") && b.customerName) parts.push("name " + String(b.customerName));
   if (has("billingNotes") && b.billingNotes) parts.push("notes updated");

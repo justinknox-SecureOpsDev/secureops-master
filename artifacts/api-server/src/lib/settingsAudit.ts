@@ -19,6 +19,7 @@
 export type SettingsChangeKind =
   | "text"
   | "number"
+  | "minutes"
   | "money_cents"
   | "percent"
   | "hours"
@@ -50,6 +51,7 @@ const CUSTOMER_CONFIG_FIELDS: FieldDescriptor[] = [
   { field: "billingNotes", label: "Billing notes", kind: "text" },
   { field: "planStartDate", label: "Plan start date", kind: "text" },
   { field: "timeConfirmEditWindowHours", label: "Time-edit limit", kind: "hours" },
+  { field: "autoClockOutDelayMinutes", label: "Auto clock-out delay", kind: "minutes" },
 ];
 
 const BRAND_FIELDS: FieldDescriptor[] = [

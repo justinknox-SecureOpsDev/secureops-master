@@ -101,6 +101,10 @@ export const customerConfigSchema = z.object({
         .nullable(),
     )
     .optional(),
+  // Company-wide fallback for a site's auto clock-out wait. A site can still
+  // supply its own override; null deliberately restores the historical
+  // 10-minute fallback for sites without one.
+  autoClockOutDelayMinutes: z.number().int().min(0).max(720).nullable().optional(),
 });
 
 export type CustomerConfigInput = z.infer<typeof customerConfigSchema>;
@@ -117,6 +121,7 @@ export const CUSTOMER_CONFIG_WRITE_KEYS = [
   "billingNotes",
   "planStartDate",
   "timeConfirmEditWindowHours",
+  "autoClockOutDelayMinutes",
 ] as const;
 
 /**

@@ -36,6 +36,7 @@ let superId = "";
 let superToken = "";
 let createdUser = false;
 let startedAt: Date;
+let previousAutoClockOutDelayMinutes: number | null | undefined;
 
 async function latestCustomerConfigAudit(): Promise<typeof auditLogsTable.$inferSelect | undefined> {
   const rows = await db
@@ -105,6 +106,7 @@ const BASE_BODY = {
   officerCount: null,
   billingNotes: null,
   planStartDate: null,
+    autoClockOutDelayMinutes: null,
   processingFeeEnabled: null,
   processingFeeRate: null,
 };
@@ -137,6 +139,12 @@ beforeAll(async () => {
   superToken = signToken({ userId: superId, email: superEmail, role: "admin" });
 
   // Reset the singleton to a known starting point.
+  const [priorConfig] = await db
+    .select({ autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes })
+    .from(platformCustomerConfigTable)
+    .where(eq(platformCustomerConfigTable.id, "singleton"))
+    .limit(1);
+  previousAutoClockOutDelayMinutes = priorConfig?.autoClockOutDelayMinutes;
   await db
     .insert(platformCustomerConfigTable)
     .values({ id: "singleton", timeConfirmEditWindowHours: "2" })
@@ -150,6 +158,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.execute(sql`DELETE FROM audit_logs WHERE actor_user_id = ${superId} AND created_at > ${startedAt}`);
+  await db
+    .update(platformCustomerConfigTable)
+    .set({ autoClockOutDelayMinutes: previousAutoClockOutDelayMinutes ?? null })
+    .where(eq(platformCustomerConfigTable.id, "singleton"));
   if (createdUser) {
     await db.execute(sql`DELETE FROM users WHERE id = ${superId}`);
   }
@@ -200,5 +212,30 @@ describe("time-edit limit change audit trail", () => {
     // timeConfirmEditWindowHours entry (the limit did not change).
     const changes = (meta?.["changes"] as Array<Record<string, unknown>> | undefined) ?? [];
     expect(changes.some((c) => c["field"] === "timeConfirmEditWindowHours")).toBe(false);
+  });
+
+  it("persists a company auto clock-out delay, audits it, and rejects invalid values", async () => {
+    const before = new Set((await customerConfigAudits()).map((r) => r.id));
+    const saved = await putConfig({ autoClockOutDelayMinutes: 20 });
+    expect(saved.status).toBe(200);
+    expect(saved.body?.config?.autoClockOutDelayMinutes).toBe(20);
+
+    const audit = await waitForNewAudit(before);
+    const changes = ((audit.metadata as Record<string, unknown> | null)?.["changes"] ?? []) as Array<Record<string, unknown>>;
+    const delayChange = changes.find((c) => c["field"] === "autoClockOutDelayMinutes");
+    expect(delayChange).toMatchObject({
+      label: "Auto clock-out delay",
+      old: null,
+      new: 20,
+    });
+
+    for (const autoClockOutDelayMinutes of [-1, 20.5, 721]) {
+      const invalid = await putConfig({ autoClockOutDelayMinutes });
+      expect(invalid.status).toBe(400);
+    }
+
+    const cleared = await putConfig({ autoClockOutDelayMinutes: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body?.config?.autoClockOutDelayMinutes).toBeNull();
   });
 });

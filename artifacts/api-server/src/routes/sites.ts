@@ -227,10 +227,11 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
     updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
   }
   if (autoClockOutDelayMinutes !== undefined) {
-    // null / "" → clear the override so the site falls back to the global
-    // 10-minute default. Otherwise a whole number of minutes inside the same
-    // range the scheduled job clamps to, so what an admin saves is what the
-    // job actually applies (no silently-ignored value).
+    // null / "" → clear the override so the site falls back to the company
+    // default (or the historical 10-minute default if the company leaves that
+    // blank). Otherwise a whole number of minutes inside the same range the
+    // scheduled job clamps to, so what an admin saves is what the job actually
+    // applies (no silently-ignored value).
     if (autoClockOutDelayMinutes === null || autoClockOutDelayMinutes === "") {
       updates.autoClockOutDelayMinutes = null;
     } else {
@@ -238,7 +239,7 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
       if (!Number.isInteger(n) || n < AUTO_CLOCKOUT_DELAY_MIN_MINUTES || n > AUTO_CLOCKOUT_DELAY_MAX_MINUTES) {
         res.status(400).json({
           error: "Bad Request",
-          message: `autoClockOutDelayMinutes must be a whole number of minutes between ${AUTO_CLOCKOUT_DELAY_MIN_MINUTES} and ${AUTO_CLOCKOUT_DELAY_MAX_MINUTES} (or null to use the ${DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES}-minute default).`,
+          message: `autoClockOutDelayMinutes must be a whole number of minutes between ${AUTO_CLOCKOUT_DELAY_MIN_MINUTES} and ${AUTO_CLOCKOUT_DELAY_MAX_MINUTES} (or null to use the company default; ${DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES} minutes if that is blank).`,
         });
         return;
       }

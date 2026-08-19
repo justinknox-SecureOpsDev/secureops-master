@@ -102,6 +102,7 @@ type CustomerConfig = {
   billingNotes: string | null;
   planStartDate: string | null;
   timeConfirmEditWindowHours: string | null;
+  autoClockOutDelayMinutes: number | null;
   updatedAt?: string | null;
   updatedBy?: string | null;
 };
@@ -131,6 +132,7 @@ const EMPTY_CONFIG: CustomerConfig = {
   billingNotes: null,
   planStartDate: null,
   timeConfirmEditWindowHours: null,
+  autoClockOutDelayMinutes: null,
 };
 
 type BrandCfg = {
@@ -231,6 +233,7 @@ export default function PlatformFeaturesPage() {
         billingNotes: c.billingNotes,
         planStartDate: c.planStartDate,
         timeConfirmEditWindowHours: c.timeConfirmEditWindowHours ?? null,
+        autoClockOutDelayMinutes: c.autoClockOutDelayMinutes ?? null,
       } : EMPTY_CONFIG);
     }
   }, [configQ.data]);
@@ -257,7 +260,8 @@ export default function PlatformFeaturesPage() {
       configDraft.officerCount !== (c.officerCount ?? null) ||
       configDraft.billingNotes !== (c.billingNotes ?? null) ||
       configDraft.planStartDate !== (c.planStartDate ?? null) ||
-      configDraft.timeConfirmEditWindowHours !== (c.timeConfirmEditWindowHours ?? null)
+      configDraft.timeConfirmEditWindowHours !== (c.timeConfirmEditWindowHours ?? null) ||
+      configDraft.autoClockOutDelayMinutes !== (c.autoClockOutDelayMinutes ?? null)
     );
   })();
 
@@ -702,6 +706,38 @@ export default function PlatformFeaturesPage() {
               />
               <span className="text-sm opacity-60">hours (blank = default 2h)</span>
             </div>
+          </div>
+          <div className="space-y-2 border rounded-lg p-4">
+            <div>
+              <p className="text-sm font-semibold">Auto clock-out delay</p>
+              <p className="text-xs opacity-60">
+                Default wait after a shift ends before an abandoned time entry is auto-closed.
+                A site-specific delay overrides this setting.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-60 whitespace-nowrap">Default</p>
+              <Input
+                aria-label="Auto clock-out delay"
+                type="number"
+                min={0}
+                max={720}
+                step={1}
+                inputMode="numeric"
+                className="w-28"
+                placeholder="10"
+                value={configDraft.autoClockOutDelayMinutes ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setConfigDraft((p) => ({
+                    ...p,
+                    autoClockOutDelayMinutes: raw === "" ? null : Number(raw),
+                  }));
+                }}
+              />
+              <span className="text-sm opacity-60">minutes (blank = default 10)</span>
+            </div>
+            <p className="text-xs opacity-50">Whole minutes from 0 to 720. Set 0 to auto-clock out as soon as the shift ends.</p>
           </div>
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Billing notes</p>

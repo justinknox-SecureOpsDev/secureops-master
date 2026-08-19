@@ -10,6 +10,7 @@ import {
   timeEntriesTable,
   shiftsTable,
   sitesTable,
+  platformCustomerConfigTable,
   siteManagersTable,
   clientsTable,
   notificationsTable,
@@ -561,6 +562,12 @@ describe("resolveAutoClockOutDelayMinutes", () => {
     expect(resolveAutoClockOutDelayMinutes(720)).toBe(720);
   });
 
+  it("uses the company default only when the site has no override", () => {
+    expect(resolveAutoClockOutDelayMinutes(null, 20)).toBe(20);
+    expect(resolveAutoClockOutDelayMinutes(undefined, 20)).toBe(20);
+    expect(resolveAutoClockOutDelayMinutes(45, 20)).toBe(45);
+  });
+
   it("clamps corrupt values into the supported range", () => {
     expect(resolveAutoClockOutDelayMinutes(-30)).toBe(0);
     expect(resolveAutoClockOutDelayMinutes(100_000)).toBe(720);
@@ -624,6 +631,7 @@ describe("autoClockOutEndedShifts", () => {
   const ATAG = `${TAG}-aco`;
   let siteId: string;
   let clientId: string;
+  let previousCompanyDefault: number | null | undefined;
   // Extra sites created per-test to exercise the per-site timing settings.
   const extraSiteIds: string[] = [];
 
@@ -683,6 +691,12 @@ describe("autoClockOutEndedShifts", () => {
   }
 
   beforeAll(async () => {
+    const [existingConfig] = await db
+      .select({ autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes })
+      .from(platformCustomerConfigTable)
+      .where(eq(platformCustomerConfigTable.id, "singleton"))
+      .limit(1);
+    previousCompanyDefault = existingConfig?.autoClockOutDelayMinutes;
     const [c] = await db
       .insert(clientsTable)
       .values({ name: `${ATAG}-client` })
@@ -703,6 +717,14 @@ describe("autoClockOutEndedShifts", () => {
       await db.execute(sql`DELETE FROM sites WHERE id = ${id}`);
     }
     await db.execute(sql`DELETE FROM clients WHERE name = ${`${ATAG}-client`}`);
+    if (previousCompanyDefault === undefined) {
+      await db.delete(platformCustomerConfigTable).where(eq(platformCustomerConfigTable.id, "singleton"));
+    } else {
+      await db
+        .update(platformCustomerConfigTable)
+        .set({ autoClockOutDelayMinutes: previousCompanyDefault })
+        .where(eq(platformCustomerConfigTable.id, "singleton"));
+    }
   });
 
   it("closes a months-open entry with a capped, reviewable duration and still closes everyone else in the same run", async () => {
@@ -799,6 +821,35 @@ describe("autoClockOutEndedShifts", () => {
     expect(late.clockOutTime?.getTime()).toBe(lateEnd.getTime());
     expect(late.notes).toContain("Waited 45 min past scheduled end");
     expect(late.notes).toContain("grace period unpaid");
+  });
+
+  it("uses the company default for a site without its own delay, and records that delay", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    await db
+      .insert(platformCustomerConfigTable)
+      .values({ id: "singleton", autoClockOutDelayMinutes: 20 })
+      .onConflictDoUpdate({
+        target: platformCustomerConfigTable.id,
+        set: { autoClockOutDelayMinutes: 20 },
+      });
+
+    const earlyEmp = await makeActiveEmployee("aco-company-early");
+    const earlyEnd = new Date(now - 15 * MIN);
+    const earlyShift = await makeShift("company-early", new Date(now - 8 * 60 * MIN), earlyEnd);
+    const earlyEntry = await makeOpenEntry(earlyEmp, earlyShift, new Date(now - 8 * 60 * MIN));
+
+    const lateEmp = await makeActiveEmployee("aco-company-late");
+    const lateEnd = new Date(now - 25 * MIN);
+    const lateShift = await makeShift("company-late", new Date(now - 8 * 60 * MIN), lateEnd);
+    const lateEntry = await makeOpenEntry(lateEmp, lateShift, new Date(now - 8 * 60 * MIN));
+
+    await autoClockOutEndedShifts();
+
+    expect((await readEntry(earlyEntry)).clockOutTime).toBeNull();
+    const late = await readEntry(lateEntry);
+    expect(late.clockOutTime?.getTime()).toBe(lateEnd.getTime());
+    expect(late.notes).toContain("Waited 20 min past scheduled end");
   });
 
   it("pays through the grace window when the site opts in, and says so on the entry", async () => {

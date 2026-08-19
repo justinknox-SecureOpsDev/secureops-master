@@ -11,6 +11,7 @@ import {
   sitesTable,
   timeEntriesTable,
   payrollEntriesTable,
+  platformCustomerConfigTable,
   patrolScansTable,
   highRiskChangeQueueTable,
   locationPingsTable,
@@ -1070,15 +1071,20 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
  * Resolve a site's stored auto-clock-out delay into the number of minutes the
  * job will actually wait past a shift's scheduled end.
  *
- * NULL / missing / non-finite → the global default (10 minutes), so a site
- * that has never been configured behaves exactly as it always has. Anything
+ * A site's override wins over the company default. When neither is set (or
+ * the selected value is non-finite), the historical 10-minute fallback keeps
+ * unconfigured deployments behaving exactly as they always have. Anything
  * else is floored to whole minutes and clamped into
  * [AUTO_CLOCKOUT_DELAY_MIN_MINUTES, AUTO_CLOCKOUT_DELAY_MAX_MINUTES]. The
  * clamp is deliberately defensive rather than trusting the write-side
  * validation: a single corrupt row must never park entries open indefinitely
  * (nor, with paid grace on, invent runaway hours) for the rest of the fleet.
  */
-export function resolveAutoClockOutDelayMinutes(raw: number | null | undefined): number {
+export function resolveAutoClockOutDelayMinutes(
+  siteDelayMinutes: number | null | undefined,
+  companyDefaultDelayMinutes?: number | null,
+): number {
+  const raw = siteDelayMinutes ?? companyDefaultDelayMinutes;
   if (raw == null) return DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES;
   const n = Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES;
@@ -1109,6 +1115,7 @@ interface ClockOutReminderPlan {
 export function getClockOutReminderPlan(args: {
   autoClockOutEnabled: boolean | null | undefined;
   autoClockOutDelayMinutes: number | null | undefined;
+  companyDefaultDelayMinutes?: number | null;
 }): ClockOutReminderPlan[] {
   if (args.autoClockOutEnabled === false) {
     return [
@@ -1117,7 +1124,10 @@ export function getClockOutReminderPlan(args: {
     ];
   }
 
-  const delayMinutes = resolveAutoClockOutDelayMinutes(args.autoClockOutDelayMinutes);
+  const delayMinutes = resolveAutoClockOutDelayMinutes(
+    args.autoClockOutDelayMinutes,
+    args.companyDefaultDelayMinutes,
+  );
   return [
     {
       offsetMinutes: Math.max(0, delayMinutes - AUTO_CLOCKOUT_REMINDER_LEAD_MINUTES),
@@ -1141,6 +1151,7 @@ export function getClockOutReminderMessage(args: {
   shiftEndTime: Date;
   autoClockOutEnabled: boolean | null | undefined;
   autoClockOutDelayMinutes: number | null | undefined;
+  companyDefaultDelayMinutes?: number | null;
   tier: ClockOutReminderTier;
   now: number;
 }): string {
@@ -1150,7 +1161,10 @@ export function getClockOutReminderMessage(args: {
   }
 
   const deadline = new Date(args.shiftEndTime).getTime()
-    + resolveAutoClockOutDelayMinutes(args.autoClockOutDelayMinutes) * MIN_MS;
+    + resolveAutoClockOutDelayMinutes(
+      args.autoClockOutDelayMinutes,
+      args.companyDefaultDelayMinutes,
+    ) * MIN_MS;
   const minutesUntilClose = Math.max(0, Math.ceil((deadline - args.now) / MIN_MS));
 
   if (args.tier === "first") {
@@ -1256,6 +1270,16 @@ export async function claimAutoClockOutEntry(args: {
 export async function autoClockOutEndedShifts(): Promise<void> {
   try {
     const now = Date.now();
+    // Read once per run so a Platform Settings change applies on the next
+    // scheduler tick without issuing an extra query for every open entry.
+    const [companySettings] = await db
+      .select({
+        autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes,
+      })
+      .from(platformCustomerConfigTable)
+      .where(eq(platformCustomerConfigTable.id, "singleton"))
+      .limit(1);
+    const companyDefaultDelayMinutes = companySettings?.autoClockOutDelayMinutes;
     const freshLocationCutoff = new Date(now - GEOFENCE_FRESH_MS);
 
     // Shift-linked rows are pre-filtered only on "the shift has already
@@ -1306,9 +1330,13 @@ export async function autoClockOutEndedShifts(): Promise<void> {
       let delayMinutes = 0;
       let payGrace = false;
       if (!isWalkUpEntry) {
-        // Per-site wait past scheduled end. No site row → the global default.
-        // Always clamped, so one corrupt value can't stall the whole fleet.
-        delayMinutes = resolveAutoClockOutDelayMinutes(r.autoClockOutDelayMinutes);
+        // A site's own wait wins over the company default. With neither set,
+        // the resolver uses the historical 10-minute fallback and clamps
+        // corrupt values so one row cannot stall the fleet.
+        delayMinutes = resolveAutoClockOutDelayMinutes(
+          r.autoClockOutDelayMinutes,
+          companyDefaultDelayMinutes,
+        );
         payGrace = r.autoClockOutPayGrace === true;
         const shiftEndMs = new Date(r.shiftEndTime!).getTime();
         if (!Number.isFinite(shiftEndMs) || now - shiftEndMs < delayMinutes * MIN_MS) continue;
@@ -1427,6 +1455,16 @@ export async function autoClockOutEndedShifts(): Promise<void> {
 export async function sendForgotClockOutReminders(): Promise<void> {
   try {
     const now = Date.now();
+    // Keep reminder timing aligned with the same effective delay used by the
+    // auto-close job. Read once for this scheduler run, not once per row.
+    const [companySettings] = await db
+      .select({
+        autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes,
+      })
+      .from(platformCustomerConfigTable)
+      .where(eq(platformCustomerConfigTable.id, "singleton"))
+      .limit(1);
+    const companyDefaultDelayMinutes = companySettings?.autoClockOutDelayMinutes;
     // The longest enabled schedule is 12 hours + the 10-minute follow-up;
     // preserve the former one-day catch-up window for disabled sites without
     // scanning every historical open entry on every five-minute tick.
@@ -1453,7 +1491,10 @@ export async function sendForgotClockOutReminders(): Promise<void> {
 
     let totalSent = 0;
     for (const row of rows) {
-      const plan = getClockOutReminderPlan(row);
+      const plan = getClockOutReminderPlan({
+        ...row,
+        companyDefaultDelayMinutes,
+      });
       for (const reminder of plan) {
         const alreadySent = reminder.column === "clockOutReminder1SentAt"
           ? row.clockOutReminder1SentAt
@@ -1496,6 +1537,7 @@ export async function sendForgotClockOutReminders(): Promise<void> {
               shiftEndTime: row.shiftEndTime,
               autoClockOutEnabled: row.autoClockOutEnabled,
               autoClockOutDelayMinutes: row.autoClockOutDelayMinutes,
+              companyDefaultDelayMinutes,
               tier: reminder.tier,
               now,
             }),
