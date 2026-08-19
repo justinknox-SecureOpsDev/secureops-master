@@ -148,6 +148,16 @@ a manual status flag, not in-app billing. New registrations always start in
    Nothing about the customer's own backend changes — this is purely a
    record in the operator's registry.
 
+## Phase 12 — Keeping them up to date after go-live
+
+A fork is a point-in-time copy: features merged into this master afterwards do
+**not** reach the customer on their own. Updates travel through a private
+GitHub mirror of this project (`justinknox-SecureOpsDev/secureops-master`) —
+this project pushes to it, each customer copy pulls from it.
+
+Full procedure, including how to merge without clobbering their environment
+settings: **`docs/update-existing-customer-runbook.md`**.
+
 ---
 
 ## Quick-reference: the whole flow
