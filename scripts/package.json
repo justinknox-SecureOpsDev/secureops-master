@@ -9,6 +9,7 @@
     "check-security-headers": "tsx ./src/check-security-headers.ts",
     "check-front-door": "tsx ./src/check-front-door.ts",
     "check-tenant-config": "tsx ./src/check-tenant-config.ts",
+    "check-fork-integrity": "tsx ./src/check-fork-integrity.ts",
     "check-schema-drift": "tsx ./src/check-schema-drift.ts",
     "sync-feature-keys": "tsx ./src/sync-feature-keys.ts",
     "generate-legal-pdfs": "tsx ./src/generate-legal-pdfs.ts",

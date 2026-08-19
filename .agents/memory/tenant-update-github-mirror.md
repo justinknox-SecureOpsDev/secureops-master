@@ -15,6 +15,14 @@ A Replit fork is a point-in-time copy and there is **no fork-sync feature** (con
 - `.replit` must be merged by hand — keep the **tenant's** `[userenv*]` blocks (ORG_CODE, admin emails, APP_BASE_URL/ALLOWED_ORIGINS, no ORG_DIRECTORY, never EXPO_TOKEN), take the **master's** workflows/ports/nix/deployment.
 - Code alone is not enough: the tenant still needs `db push` on dev and a republish to migrate its own production database.
 
+## A fork is a READ-ONLY downstream copy
+
+Never run agent tasks and never hand-edit code inside a customer repl. `.replit`'s `[userenv*]` blocks are the only thing an operator touches there; customer-specific *behavior* is data (admin portal / control plane), not code.
+
+**Why:** a fork that grows its own commits on shared files conflicts on the next `git merge upstream/main` — and it conflicts in exactly the largest shared route files. Hand-resolving those interleaves unrelated handler bodies, and the wreckage still typechecks and can still pass tests. "Gates are green" is therefore NOT evidence a fork is safe to publish; only a content comparison is.
+
+**How to apply:** a shared-code conflict during an update means the fork has drifted, not that the merge is hard — `git merge --abort`, take master's shared code wholesale (`git reset --hard upstream/main`), then restore only the saved `[userenv*]` blocks by hand. Verify with `pnpm --filter @workspace/scripts run check-fork-integrity` inside the tenant repl (after the merge, and again before republishing): it compares every tracked file against the merged `upstream/main` (fetched-but-unmerged does not count, same rule as the build identity), scans for conflict markers, and asserts the tenant env invariants. Recovery is safe because nothing the customer owns — database, secrets, object storage, domain, branding — lives in the code tree.
+
 ## Pushing to GitHub from inside this repl
 
 `listConnections("github")` redacts credentials, so it cannot drive `git push`. The connector's real token is reachable the same way app code gets it — `GET https://$REPLIT_CONNECTORS_HOSTNAME/api/v2/connection?include_secrets=true&connector_names=github` with header `X_REPLIT_TOKEN: repl $REPL_IDENTITY` — then push with a throwaway credential helper reading a `chmod 600` file, and delete the file afterwards. Never echo the token into shell output.
