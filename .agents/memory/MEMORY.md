@@ -138,3 +138,4 @@
 - [Agreement terms authority](agreement-terms-provider-authority.md) — signed-agreement values may only come from operator sources (control-plane config + env); tenant super-admin and brand config are NOT provider authority.
 - [hidden attribute overridden by CSS](hidden-attribute-css-override.md) — an author `display` rule on the same selector silently beats `[hidden]{display:none}`; needs an explicit `sel[hidden]{display:none}` override.
 - [Unknown vs empty UI state](unknown-vs-empty-ui-state.md) — "my save didn't take" is usually a swallowed status read drawn as the default/empty card; write reply is authoritative, 5xx/no-answer = unconfirmed.
+- [Company-owner flag vs permission matrix](company-owner-vs-permission-matrix.md) — owner flag = aggregate financial dashboards only; permission matrix = per-role module actions; full-gate vs sanitize-in-place split; audit existing test fixtures when gating an open route.

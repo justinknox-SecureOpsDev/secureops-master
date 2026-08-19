@@ -85,6 +85,8 @@ const ACTION_RULES: Array<{ prefix: string; action: string }> = [
   { prefix: "/admin/users/bulk-temp-passwords", action: "users.bulk_temp_passwords" },
   { prefix: "/admin/users/bulk-invite", action: "users.bulk_invite" },
   { prefix: "/admin/users", action: "users.admin_change" },
+  { prefix: "/admin/company-owners", action: "company_owner.change" },
+  { prefix: "/admin/permissions", action: "permissions.change" },
   { prefix: "/admin/import/", action: "table.import" },
   { prefix: "/admin/tables/", action: "table.write" },
   { prefix: "/admin/exports/preview", action: "exports.preview" },

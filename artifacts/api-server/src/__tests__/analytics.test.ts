@@ -81,6 +81,9 @@ beforeAll(async () => {
         role,
         status: "active",
         tokensValidAfter: new Date(0),
+        // Analytics is company-owner gated (Task #733); the admin fixture
+        // needs the flag exactly as the rollout backfill would grant it.
+        isCompanyOwner: role === "admin",
       })
       .returning({ id: usersTable.id });
     return row.id;

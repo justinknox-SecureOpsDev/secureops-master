@@ -13,7 +13,14 @@ import {
   chatRoomsTable,
   officerAvailabilityWindowsTable,
 } from "@workspace/db";
-import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireAdmin, requireAdminOrDispatcher, requireAuth } from "../middlewares/auth";
+import { requirePermission } from "../lib/permissions";
+
+// Representative wiring for the "dispatch.manage" permission key: assigning
+// an officer to the nearest open shift stays admin/dispatcher by default
+// (matching requireAdminOrDispatcher exactly) but is now toggleable via the
+// Permissions admin UI.
+const requireDispatchManage = [requireAuth, requirePermission("dispatch.manage")] as const;
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
@@ -354,7 +361,7 @@ router.get("/dispatch/open-shifts", requireAdminOrDispatcher, async (req, res): 
  * candidate is already assigned (race), returns 409 + the rank list so
  * the UI can pick the next.
  */
-router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+router.post("/dispatch/assign-nearest", ...requireDispatchManage, async (req, res): Promise<void> => {
   const { shiftId, dryRun, overrideLicense } = (req.body ?? {}) as {
     shiftId?: string; dryRun?: boolean; overrideLicense?: boolean;
   };

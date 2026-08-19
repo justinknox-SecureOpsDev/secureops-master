@@ -18,6 +18,17 @@ export const usersTable = pgTable("users", {
   // policies. Sign-once: cleared by POST /me/policies/acknowledge and never
   // re-set on a later policy version bump. Never set for admins.
   mustSignPolicies: boolean("must_sign_policies").notNull().default(false),
+  // Company-owner flag — INDEPENDENT of `role` and of the permission matrix.
+  // Gates access to company-wide financial dashboards (revenue/margin/profit
+  // KPIs, payroll & invoice aggregate totals, financial exports) ONLY. It
+  // never grants platform-level super-admin (that stays env-driven via
+  // SUPER_ADMIN_EMAILS — see routes/platform.ts — and is untouched by this
+  // flag). Multiple users may hold it. Non-delegable except by an existing
+  // owner (enforced in routes/companyOwners.ts, which also refuses to let the
+  // last remaining owner be revoked). `requireAuth` re-reads this column on
+  // every request (see middlewares/auth.ts) so revocation is effective on the
+  // very next API call — no re-login required.
+  isCompanyOwner: boolean("is_company_owner").notNull().default(false),
   // Per-user UI personalization (e.g. admin-portal nav group order).
   // Cosmetic only — never used for authorization decisions.
   uiPreferences: jsonb("ui_preferences").$type<{ navGroupOrder?: string[] }>(),

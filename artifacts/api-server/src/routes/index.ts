@@ -51,6 +51,8 @@ import searchRouter from "./search";
 import analyticsRouter from "./analytics";
 import adminTasksRouter from "./adminTasks";
 import employeeReportsRouter from "./employeeReports";
+import companyOwnersRouter from "./companyOwners";
+import permissionsRouter from "./permissions";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -108,6 +110,8 @@ router.use(dashboardRouter);
 router.use(chatRouter);
 router.use(liveOpsRouter);
 router.use(adminRouter);
+router.use(companyOwnersRouter);
+router.use(permissionsRouter);
 router.use(adminTasksRouter);
 router.use(employeeReportsRouter);
 router.use(storageRouter);

@@ -16,7 +16,7 @@ import PDFDocument from "pdfkit";
 import type { Response } from "express";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { db, usersTable, shiftsTable, shiftAssignmentsTable, timeEntriesTable } from "@workspace/db";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireCompanyOwner } from "../middlewares/auth";
 import { exportLimiter } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
 import { drawBrandHeader } from "../lib/pdfHeader";
@@ -68,7 +68,14 @@ function resolveRange(input: unknown, res: Response): AnalyticsRange | null {
   return { start: startUtc, end: endUtc, clientId };
 }
 
-router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
+// Company-wide revenue/margin/P&L aggregate — company-owner gated. Default
+// owners are exactly the admin-role users (rollout backfill), so this is at
+// least as strict as requireAdmin was; a non-admin explicitly granted owner
+// status may also pass, matching the spec's "independent of role" design.
+// /analytics/officers and /analytics/officer-history stay requireAdmin-only:
+// they carry no financial fields (hours, punctuality, incidents), so
+// they're outside this feature's scope.
+router.get("/analytics/summary", requireCompanyOwner, async (req, res): Promise<void> => {
   const range = resolveRange(req.query, res);
   if (!range) return;
   try {
@@ -439,7 +446,7 @@ function renderAnalyticsPdf(
   doc.end();
 }
 
-router.post("/admin/analytics/export-csv", requireAdmin, exportLimiter, async (req, res): Promise<void> => {
+router.post("/admin/analytics/export-csv", requireCompanyOwner, exportLimiter, async (req, res): Promise<void> => {
   const range = resolveRange(req.body, res);
   if (!range) return;
   const params = paramsSchema.parse(req.body);
@@ -459,7 +466,7 @@ router.post("/admin/analytics/export-csv", requireAdmin, exportLimiter, async (r
   }
 });
 
-router.post("/admin/analytics/export-pdf", requireAdmin, exportLimiter, async (req, res): Promise<void> => {
+router.post("/admin/analytics/export-pdf", requireCompanyOwner, exportLimiter, async (req, res): Promise<void> => {
   const range = resolveRange(req.body, res);
   if (!range) return;
   const params = paramsSchema.parse(req.body);

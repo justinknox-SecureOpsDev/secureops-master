@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db, subcontractorInvoicesTable, subcontractorsTable } from "@workspace/db";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireCompanyOwner } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -89,7 +89,7 @@ function csvEscape(v: unknown): string {
   return s;
 }
 
-router.post("/subcontractor-pay-run/preview", requireAdmin, async (req, res): Promise<void> => {
+router.post("/subcontractor-pay-run/preview", requireCompanyOwner, async (req, res): Promise<void> => {
   const { ids } = req.body ?? {};
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });
@@ -115,7 +115,7 @@ router.post("/subcontractor-pay-run/preview", requireAdmin, async (req, res): Pr
   });
 });
 
-router.post("/subcontractor-pay-run/export-csv", requireAdmin, async (req, res): Promise<void> => {
+router.post("/subcontractor-pay-run/export-csv", requireCompanyOwner, async (req, res): Promise<void> => {
   const { ids, batchReference } = req.body ?? {};
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });

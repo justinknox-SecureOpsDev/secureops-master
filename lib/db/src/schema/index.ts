@@ -56,3 +56,5 @@ export * from "./protectionDetails";
 export * from "./protectionPersons";
 export * from "./protectionDestinations";
 export * from "./featureFlags";
+export * from "./companyOwnerRollout";
+export * from "./permissionOverrides";

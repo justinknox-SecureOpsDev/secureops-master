@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { api, fetchWithAuth } from "@/lib/api";
 import { hoursByLevel, levelLabel } from "@/lib/invoiceLevels";
 import { formatDate, formatTime } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
+import { OwnerLockedState } from "@/components/OwnerGate";
 
 // One work session behind an invoice line item, as returned by
 // GET /invoices/:id/entries. Times are UTC ISO strings; rendered in the
@@ -259,6 +261,8 @@ function defaultPeriodForCycle(cycle: string): { start: string; end: string } {
 }
 
 export default function InvoiceBoardPage() {
+  const { user } = useAuth();
+  const isOwner = !!user?.isCompanyOwner;
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
@@ -437,6 +441,10 @@ export default function InvoiceBoardPage() {
   }, []);
 
   const reload = async () => {
+    // /invoices (list/board) is owner-gated server-side — skip the request
+    // entirely for a non-owner instead of firing a call that is guaranteed
+    // to 403.
+    if (!isOwner) { setLoading(false); return; }
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -763,6 +771,18 @@ export default function InvoiceBoardPage() {
     showToast(fail > 0 ? "err" : "ok", parts.join(" · "));
     await reload();
   };
+
+  if (!isOwner) {
+    return (
+      <div className="flex-1 overflow-auto p-6 max-w-[1400px] mx-auto w-full">
+        <div className="flex items-center gap-3 mb-1">
+          <Receipt className="w-7 h-7 brand-gold" />
+          <h1 className="text-2xl font-semibold text-brand-navy">Invoice Board</h1>
+        </div>
+        <OwnerLockedState label="invoice board" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-auto p-6 max-w-[1400px] mx-auto w-full">

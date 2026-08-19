@@ -244,6 +244,8 @@ export interface User {
   mustCompleteProfile?: boolean;
   /** True when the user must sign/acknowledge company policies before accessing the mobile app (non-admin staff only). */
   mustSignPolicies?: boolean;
+  /** Independent of role. Gates ONLY company-wide financial dashboards (revenue/margin/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call. */
+  isCompanyOwner?: boolean;
   createdAt: string;
   uiPreferences?: UiPreferences;
 }

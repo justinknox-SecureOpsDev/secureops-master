@@ -61,6 +61,8 @@ import CoverageRequests from "@/pages/CoverageRequests";
 import PlatformFeaturesPage from "@/pages/PlatformFeatures";
 import LegalAgreementsPage from "@/pages/LegalAgreements";
 import AgreementSignPage from "@/pages/AgreementSign";
+import PermissionsPage from "@/pages/Permissions";
+import CompanyOwnersPage from "@/pages/CompanyOwners";
 import { FeatureGuard } from "@/components/FeatureGate";
 
 const queryClient = new QueryClient({
@@ -187,6 +189,8 @@ function Routed() {
           <Route path="/settings/scheduler-integration" component={SchedulerIntegrationPage} />
           <Route path="/settings/invite" component={OrgInvitePage} />
           <Route path="/platform/features" component={PlatformFeaturesPage} />
+          <Route path="/settings/permissions" component={PermissionsPage} />
+          <Route path="/settings/company-owners" component={CompanyOwnersPage} />
           <Route path="/legal/agreements" component={LegalAgreementsPage} />
           <Route path="/legal/agreements/sign/:slot" component={AgreementSignPage} />
           <Route path="/radio">{() => <FeatureGuard feature="radio"><RadioPage /></FeatureGuard>}</Route>

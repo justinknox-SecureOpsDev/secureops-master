@@ -5,7 +5,14 @@ import { isNull } from "drizzle-orm";
 import { z } from "zod/v4";
 import { randomUUID } from "node:crypto";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireCompanyOwner } from "../middlewares/auth";
+import { requirePermission } from "../lib/permissions";
+
+// Single-payroll-entry, day-to-day transactional edits stay reachable by
+// anyone with the finance.transactions permission — independent of the
+// company-owner flag, which gates only the aggregate payroll list/board/
+// pay-run views below. See @workspace/permission-keys.
+const requirePayrollTransactionPermission = [requireAuth, requirePermission("finance.transactions")] as const;
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
 import { resolvePayRate, type PayRateSource } from "../lib/payRate";
 import { businessTimeZone, businessDateToUtc, startOfBusinessWeek } from "../lib/businessTime";
@@ -25,7 +32,11 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
+// Aggregate payroll list — this is the source for the mobile admin payroll
+// screen's totals, so it's company-owner gated like the other aggregate
+// financial views (default owners are exactly the admin-role users from the
+// rollout backfill).
+router.get("/payroll", requireCompanyOwner, async (req, res): Promise<void> => {
   const { employeeId, siteId, status, periodStart, periodEnd } = req.query as Record<string, string | undefined>;
 
   const conditions = [];
@@ -68,7 +79,7 @@ router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
 
 // Generate weekly payroll for a site from APPROVED time entries.
 // Aggregates per (employee × shift payRate) and produces one payroll entry per employee for that week.
-router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> => {
+router.post("/payroll/generate", ...requirePayrollTransactionPermission, async (req, res): Promise<void> => {
   const { siteId, weekStart } = req.body;
   if (!siteId || !weekStart) {
     res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
@@ -282,7 +293,7 @@ function csvEscape(v: unknown): string {
   return s;
 }
 
-router.post("/payroll/pay-run/preview", requireAdmin, async (req, res): Promise<void> => {
+router.post("/payroll/pay-run/preview", requireCompanyOwner, async (req, res): Promise<void> => {
   const { ids } = req.body ?? {};
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });
@@ -313,7 +324,7 @@ router.post("/payroll/pay-run/preview", requireAdmin, async (req, res): Promise<
   });
 });
 
-router.post("/payroll/pay-run/export-csv", requireAdmin, async (req, res): Promise<void> => {
+router.post("/payroll/pay-run/export-csv", requireCompanyOwner, async (req, res): Promise<void> => {
   const { ids, batchReference } = req.body ?? {};
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });
@@ -1203,7 +1214,7 @@ async function computeBoardBuckets(filters: {
  * already-paid officer-week are intentionally NOT silently merged into a
  * second payroll_entry — they would create duplicate pay.
  */
-router.get("/payroll/board", requireAdmin, async (req, res): Promise<void> => {
+router.get("/payroll/board", requireCompanyOwner, async (req, res): Promise<void> => {
   const { statusFilter = "ready", siteId, from, to } = req.query as Record<string, string | undefined>;
 
   // Archived view: sourced directly from payroll_entries (status='archived'),
@@ -2099,7 +2110,7 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
   });
 });
 
-router.put("/payroll/:id", requireAdmin, async (req, res): Promise<void> => {
+router.put("/payroll/:id", ...requirePayrollTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { status, notes } = req.body;
   const updates: Record<string, unknown> = {};

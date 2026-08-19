@@ -876,6 +876,12 @@ export const LoginResponse = zod.object({
       .describe(
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
+    isCompanyOwner: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
+      ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
       .object({
@@ -945,6 +951,12 @@ export const ChangePasswordResponse = zod.object({
       .optional()
       .describe(
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
+      ),
+    isCompanyOwner: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
       ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
@@ -1171,6 +1183,12 @@ export const ResetPasswordResponse = zod.object({
       .describe(
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
+    isCompanyOwner: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
+      ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
       .object({
@@ -1224,6 +1242,12 @@ export const GetMeResponse = zod.object({
     .optional()
     .describe(
       "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
+    ),
+  isCompanyOwner: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
     ),
   createdAt: zod.coerce.date(),
   uiPreferences: zod
@@ -6097,6 +6121,12 @@ export const AcknowledgePoliciesResponse = zod.object({
     .optional()
     .describe(
       "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
+    ),
+  isCompanyOwner: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
     ),
   createdAt: zod.coerce.date(),
   uiPreferences: zod

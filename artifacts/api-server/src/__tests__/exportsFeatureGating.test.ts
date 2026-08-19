@@ -63,6 +63,8 @@ beforeAll(async () => {
       role: "admin",
       status: "active",
       tokensValidAfter: new Date(0),
+      // The payroll_entries export dataset is finance-gated (Task #733).
+      isCompanyOwner: true,
     })
     .returning({ id: usersTable.id });
   ctx.adminToken = signToken({ userId: admin.id, email: `${TAG}-admin@example.test`, role: "admin" });

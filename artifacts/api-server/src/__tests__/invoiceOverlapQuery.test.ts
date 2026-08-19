@@ -61,6 +61,8 @@ beforeAll(async () => {
       role: "admin",
       status: "active",
       tokensValidAfter: new Date(0),
+      // GET /invoices is company-owner gated (Task #733).
+      isCompanyOwner: true,
     })
     .returning({ id: usersTable.id });
   ctx.adminId = admin.id;

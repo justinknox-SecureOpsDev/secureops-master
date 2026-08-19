@@ -128,6 +128,7 @@ export function buildNavGroups(
   isDispatcher: boolean,
   isSuperAdmin = false,
   featureEnabled: (key: FeatureKey) => boolean = () => true,
+  isCompanyOwner = false,
 ): NavGroup[] {
   // Admin-only landing dashboard. Listed first so `/` resolves here (exact
   // match — "/" only prefix-matches itself, so it never shadows other routes).
@@ -258,8 +259,17 @@ export function buildNavGroups(
       { href: "/exports", label: "Exports", Icon: Download },
       { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
       { href: "/legal/agreements", label: "Legal & Agreements", Icon: FileText },
+      { href: "/settings/permissions", label: "Permissions", Icon: SlidersHorizontal },
     ],
   };
+
+  // Company-owner-only surface: grant/revoke who can see aggregate financial
+  // dashboards. Independent of isSuperAdmin (platform-level) — a regular
+  // admin who is not an owner never sees this link, matching the server's
+  // requireCompanyOwner gate on the underlying API.
+  if (isCompanyOwner) {
+    platformGroup.items.push({ href: "/settings/company-owners", label: "Company Owners", Icon: KeyRound });
+  }
 
   // Drop any nav item whose feature the active plan doesn't include, then drop
   // any group left empty. Items with no `feature` are always-on (auth, CRUD,
@@ -405,8 +415,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // preference. `navOrderOverride` reflects a save made this session without
   // waiting for a /auth/me refetch.
   const defaultGroups = useMemo(
-    () => buildNavGroups(isDispatcher, isSuperAdmin, isFeatureEnabled),
-    [isDispatcher, isSuperAdmin],
+    () => buildNavGroups(isDispatcher, isSuperAdmin, isFeatureEnabled, !!user?.isCompanyOwner),
+    [isDispatcher, isSuperAdmin, user?.isCompanyOwner],
   );
   const [navOrderOverride, setNavOrderOverride] = useState<string[] | null>(null);
   const savedNavOrder = navOrderOverride ?? user?.uiPreferences?.navGroupOrder ?? null;

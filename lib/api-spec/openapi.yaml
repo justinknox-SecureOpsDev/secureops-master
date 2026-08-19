@@ -3809,6 +3809,9 @@ components:
         mustSignPolicies:
           type: boolean
           description: "True when the user must sign/acknowledge company policies before accessing the mobile app (non-admin staff only)."
+        isCompanyOwner:
+          type: boolean
+          description: "Independent of role. Gates ONLY company-wide financial dashboards (revenue/margin/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call."
         createdAt:
           type: string
           format: date-time

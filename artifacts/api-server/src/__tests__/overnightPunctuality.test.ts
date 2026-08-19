@@ -70,6 +70,8 @@ async function makeUser(suffix: string): Promise<string> {
       role: suffix === "admin" ? "admin" : "employee",
       status: "active",
       tokensValidAfter: new Date(0),
+      // /analytics/summary is company-owner gated (Task #733).
+      isCompanyOwner: suffix === "admin",
     })
     .returning({ id: usersTable.id });
   return row.id;

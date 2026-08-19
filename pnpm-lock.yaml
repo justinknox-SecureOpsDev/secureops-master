@@ -345,6 +345,9 @@ importers:
       '@workspace/legal-docs':
         specifier: workspace:*
         version: link:../../lib/legal-docs
+      '@workspace/permission-keys':
+        specifier: workspace:*
+        version: link:../../lib/permission-keys
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -447,6 +450,9 @@ importers:
       '@workspace/legal-docs':
         specifier: workspace:*
         version: link:../../lib/legal-docs
+      '@workspace/permission-keys':
+        specifier: workspace:*
+        version: link:../../lib/permission-keys
       '@workspace/screen-names':
         specifier: workspace:*
         version: link:../../lib/screen-names
@@ -1158,6 +1164,9 @@ importers:
       '@workspace/feature-keys':
         specifier: workspace:*
         version: link:../../lib/feature-keys
+      '@workspace/permission-keys':
+        specifier: workspace:*
+        version: link:../../lib/permission-keys
       '@workspace/screen-names':
         specifier: workspace:*
         version: link:../../lib/screen-names
@@ -1330,6 +1339,8 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+
+  lib/permission-keys: {}
 
   lib/screen-names: {}
 

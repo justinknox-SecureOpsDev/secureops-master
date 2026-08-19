@@ -9,6 +9,8 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { OfficerEditReviewDialog, type OfficerEditEntry } from "@/components/OfficerEditReviewDialog";
+import { useAuth } from "@/lib/auth";
+import { OwnerLockedState } from "@/components/OwnerGate";
 
 type BoardBucket = {
   employeeId: string;
@@ -118,6 +120,8 @@ const statusPill = (status: BoardGroup["status"]) => {
 };
 
 export default function PayrollBoardPage() {
+  const { user } = useAuth();
+  const isOwner = !!user?.isCompanyOwner;
   const [, setLocation] = useLocation();
   const [groups, setGroups] = useState<BoardGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,6 +196,9 @@ export default function PayrollBoardPage() {
   }, []);
 
   const reload = async () => {
+    // /payroll/board is owner-gated server-side — skip the request entirely
+    // for a non-owner instead of firing a call that is guaranteed to 403.
+    if (!isOwner) { setLoading(false); return; }
     setLoading(true);
     try {
       const params = new URLSearchParams({ statusFilter });
@@ -433,6 +440,18 @@ export default function PayrollBoardPage() {
       setBusy(false);
     }
   };
+
+  if (!isOwner) {
+    return (
+      <div className="flex-1 overflow-auto p-6 max-w-[1400px] mx-auto w-full">
+        <div className="flex items-center gap-3 mb-1">
+          <Banknote className="w-7 h-7 brand-gold" />
+          <h1 className="text-2xl font-semibold text-brand-navy">Payroll Board</h1>
+        </div>
+        <OwnerLockedState label="payroll board" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-auto p-6 max-w-[1400px] mx-auto w-full">

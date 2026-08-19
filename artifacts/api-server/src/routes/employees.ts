@@ -3,6 +3,12 @@ import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
 import { requireAuth, requireStaff, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, signPdfDownloadToken, verifyPdfDownloadToken, pdfDownloadTokenTtlSeconds, type PdfDownloadTokenPayload } from "../middlewares/auth";
+import { requirePermission, ASSIGNABLE_ROLES } from "../lib/permissions";
+
+// Representative wiring for the "personnel.manage" permission key: creating
+// a new employee stays admin-only by default (matching requireAdmin exactly)
+// but is now toggleable via the Permissions admin UI.
+const requirePersonnelManage = [requireAuth, requirePermission("personnel.manage")] as const;
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -322,7 +328,7 @@ router.get("/employees", requireSchedulingStaff, async (req, res): Promise<void>
   res.json(employees);
 });
 
-router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
+router.post("/employees", ...requirePersonnelManage, async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const { email, password, firstName, lastName, role } = body as {
     email?: string; password?: string; firstName?: string; lastName?: string; role?: string;
@@ -331,13 +337,38 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "email, password, firstName, lastName required" });
     return;
   }
+
+  // Privilege-escalation guard: `personnel.manage` is a DELEGABLE permission
+  // (an admin can grant it to dispatcher/site_manager/employee via the
+  // permission matrix), but creating a user record is also how account
+  // ROLE gets set. Without this check, granting personnel.manage to any
+  // non-admin role would let that user create a brand-new "admin" (or
+  // dispatcher/site_manager) account for themselves or a collaborator —
+  // silently escalating past whatever the permission matrix intended to
+  // scope them to. Only an actual admin-role caller may create a
+  // privileged-role account; every other caller (however they reached this
+  // route) may only create plain "employee" accounts, regardless of what
+  // `role` they passed in the body.
+  const requestedRole = role || "employee";
+  if (requestedRole !== "employee" && req.user!.role !== "admin") {
+    res.status(403).json({
+      error: "Forbidden",
+      message: "Only an admin may create a user with a role other than 'employee'",
+    });
+    return;
+  }
+  if (!ASSIGNABLE_ROLES.includes(requestedRole as (typeof ASSIGNABLE_ROLES)[number])) {
+    res.status(400).json({ error: "Bad Request", message: `Invalid role: ${requestedRole}` });
+    return;
+  }
+
   const passwordHash = await bcrypt.hash(password, 10);
   const [user] = await db.insert(usersTable).values({
     email: email.toLowerCase(),
     passwordHash,
     firstName,
     lastName,
-    role: role || "employee",
+    role: requestedRole,
     status: "active",
   }).returning();
 

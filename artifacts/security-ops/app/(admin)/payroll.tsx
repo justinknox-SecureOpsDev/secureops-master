@@ -13,6 +13,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { FeatureGate } from "@/components/FeatureGate";
+import { OwnerGate } from "@/components/OwnerGate";
 
 function getISOWeekStart(d: Date): string {
   const day = d.getUTCDay();
@@ -26,7 +27,9 @@ const STATUS_FILTERS = ["pending", "paid"] as const;
 export default function AdminPayrollScreen() {
   return (
     <FeatureGate feature="payroll">
-      <AdminPayrollScreenInner />
+      <OwnerGate label="payroll dashboard">
+        <AdminPayrollScreenInner />
+      </OwnerGate>
     </FeatureGate>
   );
 }

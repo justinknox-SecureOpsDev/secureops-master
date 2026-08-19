@@ -42,6 +42,8 @@ async function makeUser(role: "admin" | "employee", suffix: string): Promise<str
       role,
       status: "active",
       tokensValidAfter: new Date(0),
+      // Payroll pay-run lifecycle endpoints are company-owner gated (Task #733).
+      isCompanyOwner: role === "admin",
     })
     .returning({ id: usersTable.id });
   return row.id;

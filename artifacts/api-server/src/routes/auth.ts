@@ -136,6 +136,10 @@ export function userPayload(user: typeof usersTable.$inferSelect) {
     mustChangePassword: user.mustChangePassword,
     mustCompleteProfile: user.mustCompleteProfile,
     mustSignPolicies: user.mustSignPolicies,
+    // Independent of role/platform super-admin — gates ONLY the aggregate
+    // financial dashboards client-side (server also enforces via
+    // requireCompanyOwner on every such endpoint). See middlewares/auth.ts.
+    isCompanyOwner: user.isCompanyOwner,
     createdAt: user.createdAt,
     // Cosmetic per-user personalization (e.g. saved nav tab order). Must be
     // returned here or saved preferences vanish on the next page load.

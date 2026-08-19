@@ -2,7 +2,15 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
-import { requireStaff, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
+import { requirePermission } from "../lib/permissions";
+
+// Representative wiring for the "scheduling.manage" permission key: shift
+// creation stays reachable by admin/site_manager by default (matching
+// requireAdminOrSiteManager exactly) but is now toggleable per-role via the
+// Permissions admin UI. Per-site scope (canManageSite) is still enforced
+// inside the handler below — this only replaces the outer role gate.
+const requireSchedulingManage = [requireAuth, requirePermission("scheduling.manage")] as const;
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
@@ -296,7 +304,7 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
   }));
 });
 
-router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<void> => {
   const {
     title, siteId, clientName: bodyClientName, location: bodyLocation, locationLat, locationLng,
     startTime, endTime,

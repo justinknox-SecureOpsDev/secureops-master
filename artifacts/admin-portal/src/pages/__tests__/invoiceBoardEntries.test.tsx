@@ -55,7 +55,7 @@ const INVOICE = {
 };
 
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { id: "admin1", role: "admin" } }),
+  useAuth: () => ({ user: { id: "admin1", role: "admin", isCompanyOwner: true } }),
 }));
 
 vi.mock("@/lib/api", () => ({

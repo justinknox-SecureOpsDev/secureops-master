@@ -164,6 +164,11 @@ const CORE_UNGATED_ROUTERS = new Set<string>([
   "licensesRouter",
   "dashboardRouter",
   "adminRouter",
+  // Company-owner grant/revoke (requireCompanyOwner) and the custom-role
+  // permission matrix (requireAdmin) — configuration surfaces, not a
+  // paid/optional product tier.
+  "companyOwnersRouter",
+  "permissionsRouter",
   "storageRouter",
   "systemRouter",
   "platformRouter",

@@ -19,6 +19,7 @@
  */
 import { loadBrandOverridesFromDb } from "./brandConfig";
 import { loadFeatureOverridesFromDb } from "./features";
+import { loadPermissionOverridesFromDb } from "./permissions";
 import { logger } from "./logger";
 
 /**
@@ -45,6 +46,15 @@ function loadConfigOverrides(): Promise<void> {
     loadFeatureOverridesFromDb()
       .then(() => logger.info("Feature-flag overrides loaded"))
       .catch((err) => logger.error({ err }, "Failed to load feature-flag overrides")),
+    loadPermissionOverridesFromDb()
+      .then(() => logger.info("Permission overrides loaded"))
+      .catch((err) => logger.error({ err }, "Failed to load permission overrides")),
+    // NOTE: the one-time company-owner rollout backfill is intentionally NOT
+    // run here. It must fire only after initial/demo admin provisioning has
+    // completed (see index.ts, chained after `demoUsersSeeded`) — running it
+    // in this parallel, boot-time batch could claim its one-time marker
+    // before any admin exists on a fresh database, permanently excluding the
+    // very first admin from ever being auto-granted ownership.
   ]).then(() => undefined);
 }
 

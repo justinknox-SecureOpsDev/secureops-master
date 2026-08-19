@@ -1,7 +1,14 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, ne, lte, gte } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireCompanyOwner } from "../middlewares/auth";
+import { requirePermission } from "../lib/permissions";
+
+// Single-invoice, day-to-day transactional actions (create/edit/send/recalc
+// one invoice) stay reachable by anyone with the finance.transactions
+// permission — independent of the company-owner flag, which gates only the
+// aggregate invoice board/list below. See @workspace/permission-keys.
+const requireInvoiceTransactionPermission = [requireAuth, requirePermission("finance.transactions")] as const;
 import {
   upsertWeeklyInvoice,
   upsertCustomPeriodInvoice,
@@ -120,7 +127,9 @@ router.get("/invoices/fee-migration-status", requireAdmin, async (_req, res): Pr
   res.json({ pendingCount });
 });
 
-router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
+// Aggregate invoice board/list — company-owner gated (default owners are
+// exactly the admin-role users from the rollout backfill).
+router.get("/invoices", requireCompanyOwner, async (req, res): Promise<void> => {
   const { status, clientName, siteId, clientId, overlapStart, overlapEnd } = req.query as Record<string, string | undefined>;
   const conditions = [];
   if (status) conditions.push(eq(invoicesTable.status, status));
@@ -175,7 +184,7 @@ router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
+router.post("/invoices", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const { clientId, siteId, clientName, clientEmail, clientAddress, lineItems, taxAmount, dueDate, notes } = req.body;
   if (!clientName || !lineItems || !dueDate) {
     res.status(400).json({ error: "Bad Request", message: "clientName, lineItems, dueDate required" });
@@ -227,7 +236,7 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
 // The weekly path delegates to the same upsert the time-entry approval hook
 // uses so manual + auto behave identically. The custom path is for non-weekly
 // billing cycles and always produces a fresh draft.
-router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> => {
+router.post("/invoices/generate", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const { siteId, weekStart, periodStart, periodEnd } = req.body;
   if (!siteId) {
     res.status(400).json({ error: "Bad Request", message: "siteId is required" });
@@ -391,7 +400,7 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
 // line items (they won't for hand-edited invoices or entries changed /
 // un-approved after generation). An invoice with no linked site or period
 // returns an empty, clearly-flagged result rather than an error.
-router.get("/invoices/:id/entries", requireAdmin, async (req, res): Promise<void> => {
+router.get("/invoices/:id/entries", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [inv] = await db
     .select({
@@ -473,7 +482,7 @@ router.get("/invoices/:id/entries", requireAdmin, async (req, res): Promise<void
 // Stream a branded PDF for a single invoice — used by the admin portal's
 // "Download PDF" button. No state is mutated; call POST /invoices/:id/send
 // to email + mark sent in one step.
-router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> => {
+router.get("/invoices/:id/pdf", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [row] = await db
     .select({
@@ -697,7 +706,7 @@ function emptyPreview(id: string): SendPreviewItem {
 // single-use ticket per invoice. POST /invoices/:id/send refuses to email
 // anything without one, so no invoice can reach a client until an admin has
 // had this preview in front of them and pressed confirm.
-router.post("/invoices/send-preview", requireAdmin, async (req, res): Promise<void> => {
+router.post("/invoices/send-preview", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const { ids } = req.body as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "Provide the invoice ids to preview." });
@@ -778,7 +787,7 @@ router.post("/invoices/send-preview", requireAdmin, async (req, res): Promise<vo
 // Returns { emailSent, emailStatus, emailAddress, invoiceNumber }.
 // If SMTP is not configured, still marks the invoice sent and returns
 // emailSent:false so the admin can send the PDF manually.
-router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> => {
+router.post("/invoices/:id/send", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { email: overrideEmail, previewToken } = req.body as {
     email?: string;
@@ -905,7 +914,7 @@ type InvoiceLineItem = {
 // processingFeeRate, processingFeeAmount, and totalAmount in-place.
 // Safe to call on paid invoices too (returns the unchanged row with a flag),
 // but will not mutate them — paid invoices are a settled financial record.
-router.post("/invoices/:id/recalculate-fee", requireAdmin, async (req, res): Promise<void> => {
+router.post("/invoices/:id/recalculate-fee", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
   const [row] = await db
@@ -966,7 +975,7 @@ router.post("/invoices/:id/recalculate-fee", requireAdmin, async (req, res): Pro
   });
 });
 
-router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
+router.put("/invoices/:id", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clientEmail, clientAddress, lineItems, status, dueDate, notes } = req.body;
   const updates: Record<string, unknown> = {};

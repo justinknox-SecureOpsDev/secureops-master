@@ -29,6 +29,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
+import { useAuth } from "@/lib/auth";
+import { OwnerLockedState } from "@/components/OwnerGate";
 
 // Response shapes mirror artifacts/api-server/src/lib/analytics.ts (contract
 // lives in lib/api-spec/openapi.yaml — GET /analytics/summary + /officers).
@@ -168,6 +170,8 @@ function KpiCard({ label, value, sub, tone }: {
 }
 
 export default function AnalyticsPage() {
+  const { user } = useAuth();
+  const isOwner = !!user?.isCompanyOwner;
   const today = useMemo(() => new Date(), []);
   const [start, setStart] = useState(() =>
     localIso(new Date(today.getTime() - 55 * 86_400_000)));
@@ -212,7 +216,11 @@ export default function AnalyticsPage() {
   }, [start, end, clientId]);
 
   useEffect(() => {
-    if (rangeInvalid) return;
+    // /analytics/summary is owner-gated server-side (officers is not — it
+    // has no dollar fields — but both load together here for simplicity).
+    // Skip the request entirely for a non-owner instead of firing a call
+    // that is guaranteed to 403.
+    if (rangeInvalid || !isOwner) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -500,6 +508,18 @@ export default function AnalyticsPage() {
 
   // Officers selected on this page (for bulk dialog)
   const selectedOfficers = visibleOfficers.filter((o) => selectedIds.has(o.employeeId));
+
+  if (!isOwner) {
+    return (
+      <div className="space-y-6 p-6">
+        <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
+          <BarChart3 className="h-6 w-6 text-primary" aria-hidden="true" />
+          Analytics
+        </h1>
+        <OwnerLockedState label="analytics dashboard" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">

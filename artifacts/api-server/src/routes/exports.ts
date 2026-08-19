@@ -88,6 +88,10 @@ type Dataset = {
   label: string;
   build: DatasetBuilder;
   count: DatasetCounter;
+  // Datasets that surface aggregate company financial data (gross/net pay,
+  // rates, etc.) require the company-owner flag on top of requireAdmin —
+  // independent of any per-record accounting/payroll permission.
+  financeGated?: boolean;
 };
 
 const MAX_PDF_ROWS = 10_000;
@@ -315,6 +319,7 @@ function timeEntriesWhere(f: ExportFilters): SQL | undefined {
 const payrollDataset: Dataset = {
   id: "payroll_entries",
   label: "Payroll Entries",
+  financeGated: true,
   count: async (f) => {
     const where = payrollWhere(f);
     const [r] = await db
@@ -678,6 +683,19 @@ function blockedByFeature(ds: Dataset, res: import("express").Response): boolean
   return false;
 }
 
+/**
+ * Finance-gated datasets (currently payroll_entries) surface aggregate
+ * company financial data — require the company-owner flag independent of
+ * requireAdmin, mirroring the other aggregate financial dashboard exports.
+ */
+function blockedByOwnership(ds: Dataset, req: import("express").Request, res: import("express").Response): boolean {
+  if (ds.financeGated && !req.user?.isCompanyOwner) {
+    res.status(403).json({ error: "Forbidden", message: "Company owner access required." });
+    return true;
+  }
+  return false;
+}
+
 // ---------- PDF render ----------------------------------------------
 
 const NAVY  = _brand.colorNavy;
@@ -860,6 +878,7 @@ router.post("/admin/exports/preview", requireAdmin, exportLimiter, async (req, r
   }
   const ds = DATASETS[parsed.data.dataset];
   if (blockedByFeature(ds, res)) return;
+  if (blockedByOwnership(ds, req, res)) return;
   try {
     const [count, sample] = await Promise.all([
       ds.count(parsed.data.filters),
@@ -894,6 +913,7 @@ router.post("/admin/exports/csv", requireAdmin, exportLimiter, async (req, res):
   }
   const ds = DATASETS[parsed.data.dataset];
   if (blockedByFeature(ds, res)) return;
+  if (blockedByOwnership(ds, req, res)) return;
   try {
     const count = await ds.count(parsed.data.filters);
     if (count > MAX_CSV_ROWS) {
@@ -930,6 +950,7 @@ router.post("/admin/exports/pdf", requireAdmin, exportLimiter, async (req, res):
   }
   const ds = DATASETS[parsed.data.dataset];
   if (blockedByFeature(ds, res)) return;
+  if (blockedByOwnership(ds, req, res)) return;
   try {
     const count = await ds.count(parsed.data.filters);
     if (count > MAX_PDF_ROWS) {

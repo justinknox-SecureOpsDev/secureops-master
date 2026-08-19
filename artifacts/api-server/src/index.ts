@@ -11,6 +11,7 @@ import { startScheduledJobs } from "./lib/scheduledJobs";
 import { initConfigReadiness } from "./lib/configReadiness";
 import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
 import { restoreStrandedOnboardingApplicants } from "./lib/restoreStrandedOnboarding";
+import { backfillCompanyOwnersFromAdminRole } from "./lib/companyOwner";
 
 const rawPort = process.env["PORT"];
 
@@ -135,6 +136,20 @@ migrateLeadRoleToSiteManager()
 const demoUsersSeeded = seedDemoUsers()
   .then(() => logger.info("Demo users ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed demo users"));
+
+// One-time-ever rollout backfill: every admin-role user becomes a company
+// owner so no deployment is locked out of financial dashboards on day one.
+// MUST run only after demo/initial admin provisioning above has finished —
+// this backfill claims a permanent "already ran" marker the instant it
+// starts, so firing it any earlier (e.g. in the unordered boot-time batch
+// alongside brand/feature-flag loads) could claim that marker on a fresh
+// database before the very first admin account exists, permanently
+// excluding them. Safe to await here: it never blocks the HTTP port, which
+// is already open from `server.listen` above.
+demoUsersSeeded
+  .then(() => backfillCompanyOwnersFromAdminRole())
+  .then((n) => { if (n > 0) logger.info({ count: n }, "Backfilled company-owner flag for admin users"); })
+  .catch((err) => logger.error({ err }, "Failed to backfill company-owner flag"));
 
 // Backfill missing employees rows for every user (admin OR employee) so
 // Users / Personnel / Employees stay aligned. Idempotent — only inserts

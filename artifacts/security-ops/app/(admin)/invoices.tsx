@@ -12,6 +12,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { FeatureGate } from "@/components/FeatureGate";
+import { OwnerGate } from "@/components/OwnerGate";
 
 function getISOWeekStart(d: Date): string {
   const day = d.getUTCDay();
@@ -25,7 +26,9 @@ const FILTERS = ["draft", "sent", "paid", "overdue"] as const;
 export default function AdminInvoicesScreen() {
   return (
     <FeatureGate feature="invoicing">
-      <AdminInvoicesScreenInner />
+      <OwnerGate label="invoice dashboard">
+        <AdminInvoicesScreenInner />
+      </OwnerGate>
     </FeatureGate>
   );
 }

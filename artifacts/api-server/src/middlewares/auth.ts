@@ -42,6 +42,14 @@ export interface JwtPayload {
    * WS upgrade reject any token that carries a scope.
    */
   scope?: string;
+  /**
+   * Company-owner flag, LIVE-loaded from the `users` row on every request —
+   * never signed into the JWT itself. Populated by requireAuth /
+   * verifyAndAttachUser from the current DB value so a revoke takes effect
+   * on the very next request with no re-login required. Independent of
+   * `role` and of platform super-admin (SUPER_ADMIN_EMAILS).
+   */
+  isCompanyOwner?: boolean;
 }
 
 export interface PdfDownloadTokenPayload {
@@ -189,6 +197,7 @@ export async function verifyAndAttachUser(
       status: usersTable.status,
       mustChangePassword: usersTable.mustChangePassword,
       tokensValidAfter: usersTable.tokensValidAfter,
+      isCompanyOwner: usersTable.isCompanyOwner,
     })
     .from(usersTable)
     .where(eq(usersTable.id, payload.userId))
@@ -224,6 +233,7 @@ export async function verifyAndAttachUser(
     jti: payload.jti,
     iat: payload.iat,
     exp: payload.exp,
+    isCompanyOwner: user.isCompanyOwner,
   };
 
   void stampLastActive(user.id);
@@ -277,6 +287,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         status: usersTable.status,
         mustChangePassword: usersTable.mustChangePassword,
         tokensValidAfter: usersTable.tokensValidAfter,
+        isCompanyOwner: usersTable.isCompanyOwner,
       })
       .from(usersTable)
       .where(eq(usersTable.id, payload.userId))
@@ -313,7 +324,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
 
     // Use the live DB role — not the role baked into the token — so demotions
-    // take effect on the very next request.
+    // take effect on the very next request. Same for isCompanyOwner: it is
+    // NEVER read from the JWT, only from this fresh row, so a revoke is
+    // effective on the very next API call with no re-login required.
     req.user = {
       userId: user.id,
       email: user.email,
@@ -321,6 +334,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       jti: payload.jti,
       iat: payload.iat,
       exp: payload.exp,
+      isCompanyOwner: user.isCompanyOwner,
     };
 
     // Throttled "last active" stamp — fire-and-forget so the request path
@@ -368,6 +382,28 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   requireAuth(req, res, () => {
     if (req.user?.role !== "admin") {
       res.status(403).json({ error: "Forbidden", message: "Admin access required" });
+      return;
+    }
+    next();
+  });
+}
+
+/**
+ * Authorize company-wide financial dashboard surfaces: the caller's LIVE
+ * `is_company_owner` flag (see requireAuth) must be true.
+ *
+ * This is INDEPENDENT of `role` — an admin who is not an owner is blocked
+ * here just like anyone else — and independent of platform super-admin
+ * (SUPER_ADMIN_EMAILS, routes/platform.ts), which this flag can never grant
+ * or touch. Scope is intentionally narrow: aggregate financial dashboards
+ * only (revenue/margin/profit KPIs, payroll & invoice board totals/exports).
+ * Day-to-day single-invoice / single-payroll-entry transactions are gated by
+ * the "finance.transactions" permission key instead (see lib/permissions.ts).
+ */
+export function requireCompanyOwner(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    if (!req.user?.isCompanyOwner) {
+      res.status(403).json({ error: "Forbidden", message: "Company owner access required" });
       return;
     }
     next();

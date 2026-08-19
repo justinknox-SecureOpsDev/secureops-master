@@ -44,6 +44,10 @@ async function makeUser(role: "admin" | "employee", suffix: string): Promise<str
       role,
       status: "active",
       tokensValidAfter: new Date(0),
+      // Payroll board/list is company-owner gated (Task #733) — the admin
+      // fixture here is exercising ordinary admin payroll behavior, so it
+      // needs the owner flag exactly as the rollout backfill would grant it.
+      isCompanyOwner: role === "admin",
     })
     .returning({ id: usersTable.id });
   return row.id;

@@ -11,6 +11,14 @@ type User = {
   mustChangePassword?: boolean;
   /** Per-user UI personalization (e.g. portal nav group order). Cosmetic only. */
   uiPreferences?: { navGroupOrder?: string[] };
+  /**
+   * Company-owner flag — INDEPENDENT of role. Gates ONLY the aggregate
+   * financial dashboards (revenue/margin/profit KPIs, payroll & invoice
+   * board totals, financial exports). Always re-read live from the server
+   * on every /auth/me call; the UI must treat it as advisory only — every
+   * gated endpoint enforces this server-side regardless of what this shows.
+   */
+  isCompanyOwner?: boolean;
 };
 type AuthCtx = {
   user: User | null;

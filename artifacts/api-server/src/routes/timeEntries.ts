@@ -2,6 +2,14 @@ import { Router, type IRouter, type Response } from "express";
 import { eq, and, gte, lte, ne, isNull, inArray, sql, desc } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
+import { requirePermission } from "../lib/permissions";
+
+// Representative wiring for the "timeAttendance.manage" permission key: an
+// admin-editable time-entry correction stays reachable by admin/site_manager
+// by default (matching requireAdminOrSiteManager exactly) but is now
+// toggleable per-role. Per-site scope (canManageSite) is still enforced
+// inside the handler below — this only replaces the outer role gate.
+const requireTimeAttendanceManage = [requireAuth, requirePermission("timeAttendance.manage")] as const;
 import { upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
@@ -1543,7 +1551,7 @@ router.patch("/time-entries/:id/clock-out", requireAdminOrSiteManager, async (re
 // audit metadata, and re-syncs the weekly client invoice when the entry is
 // already approved so billed hours track the correction (best-effort, mirrors
 // the approve route).
-router.patch("/time-entries/:id/times", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.patch("/time-entries/:id/times", ...requireTimeAttendanceManage, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clockInTime, clockOutTime, notes } = req.body ?? {};
 

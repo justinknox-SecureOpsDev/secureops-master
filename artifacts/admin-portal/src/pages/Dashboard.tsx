@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatDateTime, formatTime } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
+import { OwnerLockedState } from "@/components/OwnerGate";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -303,15 +305,22 @@ function TasksPanel() {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
+  const { user } = useAuth();
+  const isOwner = !!user?.isCompanyOwner;
+
   const { data: summary, isLoading, isError } = useGetAdminDashboardSummary({
     query: { refetchInterval: 30_000, queryKey: getGetAdminDashboardSummaryQueryKey() },
   });
 
   const range = useMemo(() => last30Range(), []);
+  // Only an owner may read /analytics/summary (server enforces this too) —
+  // skip the request entirely for a non-owner instead of firing a call that
+  // is guaranteed to 403.
   const { data: fin, isLoading: finLoading, isError: finError } = useQuery({
     ...getGetAnalyticsSummaryQueryOptions(range),
     refetchInterval: 60_000,
     staleTime: 30_000,
+    enabled: isOwner,
   });
 
   return (
@@ -388,7 +397,9 @@ export function DashboardPage() {
           linkTo="/analytics"
           linkLabel="Full analytics"
         />
-        {finError ? (
+        {!isOwner ? (
+          <OwnerLockedState label="financial snapshot" />
+        ) : finError ? (
           <p className="text-sm text-destructive" role="alert">Failed to load financials.</p>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
