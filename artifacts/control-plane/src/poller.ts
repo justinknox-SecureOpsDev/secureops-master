@@ -174,6 +174,13 @@ export async function fetchCustomerConfigSnapshot(
 
 type PollRow = Pick<CustomerRow, "id" | "api_base_url" | "mgmt_secret_enc">;
 
+interface PollState {
+  reported_version: string | null;
+  last_compared_master_version: string | null;
+  behind_alerted_at: Date | null;
+  is_active: boolean;
+}
+
 export async function pollCustomer(
   row: PollRow,
   masterVersion: string | null,
@@ -195,37 +202,112 @@ export async function pollCustomer(
     ? await fetchCustomerConfigSnapshot(row.api_base_url, secret)
     : undefined;
 
-  await pool.query(
-    `UPDATE control_plane_customers
-       SET last_status = $2,
-           last_latency_ms = $3,
-           last_error = $4,
-            reported_version = CASE WHEN $7 THEN $5 ELSE reported_version END,
-            reported_built_at = CASE WHEN $7 THEN $6 ELSE reported_built_at END,
-           last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END,
-            last_current_at = CASE
-              WHEN $5 IS NOT NULL AND $5 = $8 THEN now()
-              ELSE last_current_at
-            END,
-            agreements_json = CASE WHEN $9 THEN $10 ELSE agreements_json END,
-            customer_config_json = CASE WHEN $11 THEN $12 ELSE customer_config_json END,
-           updated_at = now()
-     WHERE id = $1`,
-    [
-      row.id,
-      status,
-      latency,
-      lastError,
-      version,
-      builtAt,
-      seen,
-      masterVersion,
-      agreements !== undefined,
-      agreements ?? null,
-      customerConfig !== undefined,
-      customerConfig ?? null,
-    ],
-  );
+  const current =
+    seen &&
+    status === "online" &&
+    version !== null &&
+    masterVersion !== null &&
+    version === masterVersion;
+  const behind =
+    seen &&
+    status === "online" &&
+    version !== null &&
+    masterVersion !== null &&
+    version !== masterVersion;
+  const knownBuild = current || behind;
+
+  const client = await pool.connect();
+  let shouldWarn = false;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<PollState>(
+      `SELECT reported_version, last_compared_master_version, behind_alerted_at, is_active
+         FROM control_plane_customers
+        WHERE id = $1
+        FOR UPDATE`,
+      [row.id],
+    );
+    const previous = rows[0];
+    if (!previous) {
+      await client.query("ROLLBACK");
+      return;
+    }
+
+    // Only a known current -> known behind transition is actionable. This
+    // deliberately excludes first-seen behind customers, offline probes, and
+    // legacy backends that cannot report a version.
+    const wasCurrent =
+      previous.reported_version !== null &&
+      previous.last_compared_master_version !== null &&
+      previous.reported_version === previous.last_compared_master_version;
+    shouldWarn =
+      previous.is_active &&
+      wasCurrent &&
+      behind &&
+      previous.behind_alerted_at === null;
+
+    await client.query(
+      `UPDATE control_plane_customers
+          SET last_status = $2,
+              last_latency_ms = $3,
+              last_error = $4,
+              reported_version = CASE WHEN $7 THEN $5 ELSE reported_version END,
+              reported_built_at = CASE WHEN $7 THEN $6 ELSE reported_built_at END,
+              last_compared_master_version = CASE
+                WHEN $13 THEN $8
+                ELSE last_compared_master_version
+              END,
+              last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END,
+              last_current_at = CASE
+                WHEN $5 IS NOT NULL AND $5 = $8 THEN now()
+                ELSE last_current_at
+              END,
+              behind_alerted_at = CASE
+                WHEN $14 THEN NULL
+                WHEN $15 AND $16 THEN now()
+                ELSE behind_alerted_at
+              END,
+              agreements_json = CASE WHEN $9 THEN $10 ELSE agreements_json END,
+              customer_config_json = CASE WHEN $11 THEN $12 ELSE customer_config_json END,
+              updated_at = now()
+        WHERE id = $1`,
+      [
+        row.id,
+        status,
+        latency,
+        lastError,
+        version,
+        builtAt,
+        seen,
+        masterVersion,
+        agreements !== undefined,
+        agreements ?? null,
+        customerConfig !== undefined,
+        customerConfig ?? null,
+        knownBuild,
+        current,
+        behind,
+        shouldWarn,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  if (shouldWarn) {
+    logger.warn(
+      {
+        customerId: row.id,
+        reportedVersion: version,
+        masterVersion,
+      },
+      "[poller] active customer fell behind master build",
+    );
+  }
 }
 
 export async function pollAllOnce(): Promise<void> {

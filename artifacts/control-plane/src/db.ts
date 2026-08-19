@@ -35,11 +35,13 @@ export async function ensureSchema(): Promise<void> {
       target_version   TEXT,
       reported_version TEXT,
       reported_built_at TEXT,
+      last_compared_master_version TEXT,
       last_status      TEXT NOT NULL DEFAULT 'unknown',
       last_latency_ms  INTEGER,
       last_seen_at     TIMESTAMPTZ,
       last_error       TEXT,
       is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+      behind_alerted_at TIMESTAMPTZ,
       created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -101,6 +103,22 @@ export async function ensureSchema(): Promise<void> {
   // "last known current" timestamp instead of merely the latest probe time.
   await pool.query(
     `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS last_current_at TIMESTAMPTZ;`,
+  );
+
+  // Records whether the current behind episode has already produced the
+  // operator warning. A current poll clears this marker so a later regression
+  // can notify again; offline/legacy polls leave it unchanged.
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS behind_alerted_at TIMESTAMPTZ;`,
+  );
+
+  // The master build used for the most recent known version comparison. This
+  // lets the poller detect a current → behind transition when the master itself
+  // advances, rather than comparing the prior customer build to only the new
+  // reference.
+  await pool.query(
+    `ALTER TABLE control_plane_customers
+       ADD COLUMN IF NOT EXISTS last_compared_master_version TEXT;`,
   );
 
   // Audit trail of remote brand/feature changes pushed to customer backends.
@@ -322,12 +340,14 @@ export interface CustomerRow {
   target_version: string | null;
   reported_version: string | null;
   reported_built_at: string | null;
+  last_compared_master_version: string | null;
   last_current_at: Date | null;
   last_status: string;
   last_latency_ms: number | null;
   last_seen_at: Date | null;
   last_error: string | null;
   is_active: boolean;
+  behind_alerted_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

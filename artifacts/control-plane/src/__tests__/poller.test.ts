@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAgreementsSnapshot,
   fetchCustomerConfigSnapshot,
@@ -19,11 +19,13 @@ import {
 } from "../poller";
 import { pool } from "../db";
 import { versionStatus } from "../routes/customers";
+import { logger } from "../logger";
 
 const realFetch = globalThis.fetch;
 const customerIds: string[] = [];
 afterEach(async () => {
   globalThis.fetch = realFetch;
+  vi.restoreAllMocks();
   if (customerIds.length > 0) {
     await pool.query(`DELETE FROM control_plane_customers WHERE id = ANY($1::text[])`, [
       customerIds.splice(0),
@@ -198,6 +200,77 @@ describe("pollCustomer build freshness persistence", () => {
     expect(versionStatus(rows[0].reported_version, "master1", rows[0].last_status)).toBe(
       "unknown",
     );
+  });
+
+  it("warns once when an active customer transitions from current to behind", async () => {
+    const customer = await createCustomer();
+    const warn = vi.spyOn(logger, "warn");
+
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+
+    route({ version: res(200, { version: "older1" }) });
+    await pollCustomer(customer, "master1");
+    await pollCustomer(customer, "master1");
+
+    expect(
+      warn.mock.calls.filter((call) => call[1] === "[poller] active customer fell behind master build"),
+    ).toHaveLength(1);
+    const { rows } = await pool.query<{
+      behind_alerted_at: Date | null;
+    }>(
+      `SELECT behind_alerted_at FROM control_plane_customers WHERE id = $1`,
+      [customer.id],
+    );
+    expect(rows[0].behind_alerted_at).toBeInstanceOf(Date);
+  });
+
+  it("resets the warning transition when the customer returns current", async () => {
+    const customer = await createCustomer();
+    const warn = vi.spyOn(logger, "warn");
+
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+    route({ version: res(200, { version: "older1" }) });
+    await pollCustomer(customer, "master1");
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+    route({ version: res(200, { version: "older1" }) });
+    await pollCustomer(customer, "master1");
+
+    expect(
+      warn.mock.calls.filter((call) => call[1] === "[poller] active customer fell behind master build"),
+    ).toHaveLength(2);
+  });
+
+  it("warns when a previously current customer falls behind after the master advances", async () => {
+    const customer = await createCustomer();
+    const warn = vi.spyOn(logger, "warn");
+
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master1");
+    route({ version: res(200, { version: "master1" }) });
+    await pollCustomer(customer, "master2");
+
+    expect(
+      warn.mock.calls.filter((call) => call[1] === "[poller] active customer fell behind master build"),
+    ).toHaveLength(1);
+  });
+
+  it("does not warn for an initial behind, offline, or legacy result", async () => {
+    const customer = await createCustomer();
+    const warn = vi.spyOn(logger, "warn");
+
+    route({ version: res(200, { version: "older1" }) });
+    await pollCustomer(customer, "master1");
+    route({ version: new Error("fetch failed") });
+    await pollCustomer(customer, "master1");
+    route({ version: res(404), healthz: res(200, { status: "ok" }) });
+    await pollCustomer(customer, "master1");
+
+    expect(
+      warn.mock.calls.filter((call) => call[1] === "[poller] active customer fell behind master build"),
+    ).toHaveLength(0);
   });
 });
 
