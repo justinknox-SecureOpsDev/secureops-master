@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import {
   FileText,
@@ -12,7 +12,7 @@ import {
   BadgeCheck,
   PenLine,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { uploadFile } from "@/lib/upload";
 import { downloadSignedPdf } from "@/pages/AgreementSign";
 import { Button } from "@/components/ui/button";
@@ -98,25 +98,59 @@ const CUSTOMER_LEGAL = [
   { label: "Data Rights", href: "data-rights" },
 ];
 
+type SlotMap = Record<AgreementSlot, SlotStatus["custom"]>;
+
+const EMPTY_SLOT_MAP: SlotMap = { msa: null, user_agreement: null };
+
+/** A short-lived, slot-scoped result message shown on the card that produced it. */
+type SlotMessage = { kind: "error" | "ok"; text: string };
+
 export default function LegalAgreementsPage() {
-  // null = status unknown (load failed / not permitted) → render templates only.
-  const [statuses, setStatuses] = useState<Record<AgreementSlot, SlotStatus["custom"]> | null>(null);
+  // null = never loaded successfully. A *failed* load is tracked separately in
+  // `statusFailed` and must never be rendered as "Template": an unreachable API
+  // and "no document has been uploaded" look identical to the user otherwise,
+  // which makes a successful upload appear to have silently done nothing.
+  const [statuses, setStatuses] = useState<SlotMap | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
   const [signatures, setSignatures] = useState<Record<AgreementSlot, SignatureDto | null> | null>(
     null,
   );
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [busySlot, setBusySlot] = useState<AgreementSlot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Partial<Record<AgreementSlot, SlotMessage>>>({});
 
-  async function loadStatus() {
+  function setMessage(slot: AgreementSlot, kind: SlotMessage["kind"], text: string) {
+    setMessages((m) => ({ ...m, [slot]: { kind, text } }));
+  }
+  function clearMessage(slot: AgreementSlot) {
+    setMessages((m) => ({ ...m, [slot]: undefined }));
+  }
+
+  /**
+   * Bumped by every confirmed write. A status response that was already in
+   * flight when a write landed is discarded rather than committed: otherwise
+   * an older "no document here" read can resolve last and put the card back
+   * to "Template" after a successful replacement.
+   */
+  const writeGen = useRef(0);
+
+  /** Reports how the refresh ended so callers can describe it truthfully. */
+  async function loadStatus(): Promise<"ok" | "failed" | "superseded"> {
+    const gen = writeGen.current;
     try {
       const data = await api<{ agreements: SlotStatus[] }>("/admin/platform/agreements");
-      const map = {} as Record<AgreementSlot, SlotStatus["custom"]>;
+      if (writeGen.current !== gen) return "superseded";
+      const map = { ...EMPTY_SLOT_MAP };
       for (const s of data.agreements) map[s.slot] = s.custom;
       setStatuses(map);
+      setStatusFailed(false);
+      return "ok";
     } catch {
-      // Non-admins (or a transient failure) simply see the bundled templates.
-      setStatuses(null);
+      if (writeGen.current !== gen) return "superseded";
+      // Keep the last known state. A failed refresh must never downgrade a
+      // document we just saved back to "Template".
+      setStatusFailed(true);
+      return "failed";
     }
   }
 
@@ -133,7 +167,7 @@ export default function LegalAgreementsPage() {
   }, []);
 
   async function viewCustom(slot: AgreementSlot) {
-    setError(null);
+    clearMessage(slot);
     const win = window.open("", "_blank");
     try {
       const { url } = await api<{ url: string }>(`/admin/platform/agreements/${slot}/url`);
@@ -141,12 +175,12 @@ export default function LegalAgreementsPage() {
       else window.open(url, "_blank");
     } catch (e) {
       if (win) win.close();
-      setError(`Failed to open document: ${(e as Error).message}`);
+      setMessage(slot, "error", `Failed to open document: ${(e as Error).message}`);
     }
   }
 
   async function downloadCustom(slot: AgreementSlot) {
-    setError(null);
+    clearMessage(slot);
     try {
       const { url, fileName } = await api<{ url: string; fileName: string }>(
         `/admin/platform/agreements/${slot}/url`,
@@ -163,30 +197,72 @@ export default function LegalAgreementsPage() {
       a.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (e) {
-      setError(`Failed to download document: ${(e as Error).message}`);
+      setMessage(slot, "error", `Failed to download document: ${(e as Error).message}`);
     }
   }
 
   async function uploadCustom(slot: AgreementSlot, file: File) {
-    setError(null);
+    clearMessage(slot);
     if (!/\.pdf$/i.test(file.name)) {
-      setError("Please choose a PDF file.");
+      setMessage(slot, "error", "Please choose a PDF file.");
       return;
     }
     if (file.size > MAX_PDF_BYTES) {
-      setError("PDF exceeds the 15 MB limit.");
+      setMessage(slot, "error", "PDF exceeds the 15 MB limit.");
       return;
     }
     setBusySlot(slot);
     try {
-      const uploaded = await uploadFile(file);
-      await api(`/admin/platform/agreements/${slot}`, {
-        method: "PUT",
-        body: { fileKey: uploaded.objectPath, fileName: uploaded.name },
-      });
-      await loadStatus();
-    } catch (e) {
-      setError((e as Error).message);
+      let uploaded: Awaited<ReturnType<typeof uploadFile>>;
+      try {
+        uploaded = await uploadFile(file);
+      } catch (e) {
+        // The bytes never reached storage, so nothing was registered: this is
+        // a definite "not replaced".
+        setMessage(slot, "error", `Upload failed — the document was not replaced. ${(e as Error).message}`);
+        return;
+      }
+
+      try {
+        const saved = await api<SlotStatus>(`/admin/platform/agreements/${slot}`, {
+          method: "PUT",
+          body: { fileKey: uploaded.objectPath, fileName: uploaded.name },
+        });
+        // The server's reply is authoritative — apply it before refreshing so a
+        // failed refresh can't make a stored replacement look like it never
+        // happened (the original "my upload didn't take" report).
+        const savedName = saved?.custom?.fileName ?? uploaded.name;
+        writeGen.current += 1;
+        setStatuses((prev) => ({ ...(prev ?? EMPTY_SLOT_MAP), [slot]: saved?.custom ?? null }));
+        const refreshed = await loadStatus();
+        setMessage(
+          slot,
+          "ok",
+          refreshed === "failed"
+            ? `Saved — “${savedName}” is stored, but this page couldn't refresh. Reload to confirm.`
+            : `Saved — “${savedName}” is now the active document.`,
+        );
+      } catch (e) {
+        // Only a 4xx proves the route itself refused the write. A 5xx can come
+        // from a proxy *after* the server committed, and a non-ApiError means
+        // no answer came back at all (dropped connection, restart mid-request).
+        if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+          setMessage(slot, "error", `Upload failed — the document was not replaced. ${e.message}`);
+          return;
+        }
+        // The write may or may not have been committed, so claim neither: show
+        // what is actually stored instead. Fence reads that started before this
+        // write so a pre-upload answer can't land on top of the verification.
+        writeGen.current += 1;
+        const refreshed = await loadStatus();
+        setMessage(
+          slot,
+          "error",
+          refreshed === "failed"
+            ? `Couldn't confirm the upload (${(e as Error).message}) and this page couldn't refresh. Reload the page to see which document is stored.`
+            : `Couldn't confirm the upload (${(e as Error).message}). The badge above shows what is stored right now — if it hasn't changed, try again.`,
+        );
+      }
     } finally {
       setBusySlot(null);
     }
@@ -199,13 +275,16 @@ export default function LegalAgreementsPage() {
       )
     )
       return;
-    setError(null);
+    clearMessage(slot);
     setBusySlot(slot);
     try {
       await api(`/admin/platform/agreements/${slot}`, { method: "DELETE" });
+      writeGen.current += 1;
+      setStatuses((prev) => ({ ...(prev ?? EMPTY_SLOT_MAP), [slot]: null }));
       await loadStatus();
+      setMessage(slot, "ok", "Reverted to the bundled template.");
     } catch (e) {
-      setError((e as Error).message);
+      setMessage(slot, "error", `Could not revert: ${(e as Error).message}`);
     } finally {
       setBusySlot(null);
     }
@@ -227,12 +306,22 @@ export default function LegalAgreementsPage() {
         </p>
       </header>
 
-      {error && (
+      {statusFailed && (
         <div
-          role="alert"
-          className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="status"
+          className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
         >
-          {error}
+          <span>
+            Couldn&apos;t check which documents are uploaded — the server didn&apos;t respond.
+            {statuses ? " Showing the last known state." : " Showing the bundled templates."}
+          </span>
+          <button
+            type="button"
+            className="font-medium underline underline-offset-2"
+            onClick={() => void loadStatus()}
+          >
+            Try again
+          </button>
         </div>
       )}
 
@@ -240,6 +329,7 @@ export default function LegalAgreementsPage() {
         {AGREEMENTS.map((doc) => {
           const custom = statuses?.[doc.slot] ?? null;
           const signed = signatures?.[doc.slot] ?? null;
+          const message = messages[doc.slot];
           const templateUrl = `${BASE}legal/${doc.file}`;
           const busy = busySlot === doc.slot;
           return (
@@ -256,8 +346,8 @@ export default function LegalAgreementsPage() {
                         Signed
                       </span>
                     )}
-                    {statuses !== null &&
-                      (custom ? (
+                    {statuses !== null ? (
+                      custom ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
                           <BadgeCheck className="h-3.5 w-3.5" />
                           Uploaded document
@@ -266,7 +356,14 @@ export default function LegalAgreementsPage() {
                         <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                           Template
                         </span>
-                      ))}
+                      )
+                    ) : (
+                      statusFailed && (
+                        <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                          Status unavailable
+                        </span>
+                      )
+                    )}
                   </div>
                 </div>
                 <CardTitle className="text-base">{doc.title}</CardTitle>
@@ -289,6 +386,18 @@ export default function LegalAgreementsPage() {
                     {signed.guarantyExecuted && <> · personal guaranty executed</>}
                   </p>
                 )}
+                {message && (
+                  <p
+                    role={message.kind === "error" ? "alert" : "status"}
+                    className={`mt-3 rounded-md border px-2.5 py-1.5 text-xs ${
+                      message.kind === "error"
+                        ? "border-destructive/40 bg-destructive/10 text-destructive"
+                        : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
+                    {message.text}
+                  </p>
+                )}
               </CardContent>
               <CardFooter className="flex flex-wrap gap-2">
                 <Button asChild size="sm" variant={signed ? "outline" : "default"}>
@@ -302,9 +411,13 @@ export default function LegalAgreementsPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      setError(null);
+                      clearMessage(doc.slot);
                       void downloadSignedPdf(doc.slot).catch((e) =>
-                        setError(`Failed to download signed PDF: ${(e as Error).message}`),
+                        setMessage(
+                          doc.slot,
+                          "error",
+                          `Failed to download signed PDF: ${(e as Error).message}`,
+                        ),
                       );
                     }}
                   >
