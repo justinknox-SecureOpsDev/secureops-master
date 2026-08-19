@@ -5,7 +5,7 @@
 - [Metro watcher ENOENT on pnpm _tmp_ dirs](metro-watcher-pnpm-tmp-enoent.md) — expo crash watching `.pnpm/*_tmp_<pid>`; race with concurrent install. Fix: rm orphan `*_tmp_*` dirs + restart expo.
 - [api-server no hot reload](api-server-no-hot-reload.md) — dev script is build+start (no watcher); new/changed routes 404 until the api-server workflow is restarted.
 - [Shift assignment PUT status authz](shift-assignment-status-authz.md) — PUT assignment route must gate (role, fromStatus, toStatus), not just ownership, or officers self-approve their pending_approval claim.
-- [Scheduled job row isolation](scheduled-job-row-isolation.md) — loop bodies need per-row try/catch + clamped computed values; one overflowing row silently disabled auto-clock-out fleet-wide.
+- [Scheduled job safety](scheduled-job-row-isolation.md) — isolate rows, cap computed values, and never treat a pre-delivery claim as success before durable notification persistence.
 - [One-open-time-entry invariant](single-open-time-entry-invariant.md) — no DB uniqueness on open time entries per officer; clock-in paths must guard concurrency (FOR UPDATE on users row) themselves.
 - [requireAuth admits client role](auth-requireauth-admits-client.md) — bare requireAuth lets external client-portal users in too; staff/officer-only internal-data endpoints must use requireStaff, not requireAuth.
 - [Upload MIME octet-stream fallback](upload-mime-octet-stream.md) — browser sends octet-stream for .doc/.docx → 415; client+server derive MIME from extension; raw parser needs type:()=>true.
@@ -15,7 +15,6 @@
 - [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.
 - [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
 - [admin-portal deepLinkFocus flake](admin-portal-deeplink-flake.md) — deepLinkFocus.test.tsx animation-class assertion flakes under full parallel admin-portal run, passes in isolation; not a regression.
-- [Admin portal parallel-test timeouts](admin-portal-parallel-test-timeouts.md) — unrelated UI tests can hit 5s timeouts under workspace-wide parallel load but pass in isolation.
 - [Admin grid sort indexes](admin-grid-sort-indexes.md) — every admin-CRUD table's default sort column needs a (col, id) composite index; list + position deep-link both order by (sortCol, id).
 - [axe parent-opacity contrast](axe-parent-opacity-contrast.md) — Tailwind opacity-* on a container dims descendants; axe flags blended contrast. Fix on the leaf text node, not the child.
 - [Clock-in location-proof invariant](clock-in-location-proof.md) — GPS-less clock-in (manual siteId picker) MUST require an accepted roster at that site and NEVER auto-assign; only GPS-verified path may auto-assign.
@@ -136,4 +135,3 @@
 - [Role-scoped list endpoints](role-scoped-list-endpoints.md) — list routes widen by ROLE with no filter (admin gets everyone); personal "my stuff" screens must pass employeeId + re-assert ownership.
 - [Subcontractor QR rates](subcontractor-qr-rates.md) — pay/bill rates live on the QR token (join via qr_token_id), bill priority QR→site default; public clock endpoints must stay rate-free.
 - [hidden attribute overridden by CSS](hidden-attribute-css-override.md) — an author `display` rule on the same selector silently beats `[hidden]{display:none}`; needs an explicit `sel[hidden]{display:none}` override.
-- [Headless admin-portal verification](admin-portal-headless-verification.md) — vite dev has no /api proxy & API CORS rejects the Origin; run an in-script proxy that strips it; boolean fields are Yes/No selects.

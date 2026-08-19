@@ -1,6 +1,6 @@
 ---
-name: Scheduled jobs — per-row isolation and capped computed values
-description: Why batch jobs that loop over rows must try/catch per row and clamp any duration/amount they compute before writing.
+name: Scheduled jobs — row isolation, capped values, and retryable delivery
+description: Why batch jobs need per-row isolation, bounded computed values, and retry-safe claims for external delivery.
 ---
 
 # Scheduled jobs: isolate per row, cap what you compute
@@ -14,6 +14,12 @@ sweeps, invoice locking, reminder escalation — anything with the same shape):
    silently skipped — forever, because the same row throws on the next tick too.
 2. **Clamp any duration/amount derived from wall-clock time before writing it.**
    "now() minus a timestamp that was never closed" is unbounded.
+3. **A pre-delivery claim is not a success marker.** When an atomic
+   `UPDATE … RETURNING` claim precedes notifications, persist the complete
+   in-app delivery batch atomically. If persistence fails, release the claimed
+   rows for retry; otherwise a transient write failure permanently suppresses
+   the alert. Send best-effort device pushes only after the durable in-app rows
+   exist, so an ambiguous provider response cannot create duplicate history.
 
 **Why:** an officer's time entry was left open ~420 days *and* had a clock-in
 later than its shift's scheduled end, so the job's "fall back to now()" branch
@@ -33,6 +39,10 @@ analytics recomputes hours from the timestamps in some queries while payroll
 reads the stored column — if they disagree the two surfaces silently diverge.
 Set the cap above any legitimate value (a 24h security post with an early
 clock-in is real) so it only ever catches corrupt data.
+
+For notification sweeps, build all recipient groups after claiming. Treat
+eligibility-query failures as retryable per row, and treat the in-app batch as
+all-or-none before attempting push-provider delivery.
 
 Related: nothing enforces one-open-time-entry-per-officer at the DB level, so
 stale open entries are always possible — see `single-open-time-entry-invariant.md`.

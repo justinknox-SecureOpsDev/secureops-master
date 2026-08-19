@@ -318,6 +318,7 @@ router.get("/dispatch/open-shifts", requireAdminOrDispatcher, async (req, res): 
       headcount: shiftsTable.headcount,
       requiredLicenseLevel: shiftsTable.requiredLicenseLevel,
       payRate: shiftsTable.payRate,
+      claimableFrom: shiftsTable.claimableFrom,
       filled: sql<number>`(
         SELECT count(*)::int FROM ${shiftAssignmentsTable}
         WHERE ${shiftAssignmentsTable.shiftId} = ${shiftsTable.id}

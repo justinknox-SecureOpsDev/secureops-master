@@ -9,6 +9,12 @@ import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/sc
 import { stripShiftFinanceForRole } from "../lib/financeVisibility";
 import { resolvePayRate } from "../lib/payRate";
 import { canManageSite, getManagedSiteIds, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
+import {
+  evaluateShiftEligibility,
+  getEligibleOfficerIds,
+  getEmployeeHeldTrainings,
+  getOfficerEligibilityContext,
+} from "../lib/shiftEligibility";
 
 const router: IRouter = Router();
 
@@ -79,25 +85,6 @@ export function fmtShiftWhen(when: Date | string | number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-/**
- * Slugs of training-certification types the officer currently holds with
- * either no expiry (perpetual) or an unexpired expiry. Used to enforce
- * site.requiredTrainings on shift visibility/claim.
- */
-async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ type: trainingCertificationsTable.type })
-    .from(trainingCertificationsTable)
-    .where(and(
-      eq(trainingCertificationsTable.employeeId, employeeId),
-      or(
-        sql`${trainingCertificationsTable.expiryDate} IS NULL`,
-        gte(trainingCertificationsTable.expiryDate, sql`current_date`),
-      ),
-    ));
-  return new Set(rows.map((r) => r.type));
 }
 
 router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
@@ -191,18 +178,18 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
           .where(inArray(sitesTable.id, siteIds));
         for (const s of siteRows) siteReqMap.set(s.id, Array.isArray(s.req) ? s.req : []);
       }
-      const nowMs = Date.now();
+      const now = new Date();
       shifts = all.filter((s) => {
         if (assignedIds.includes(s.id)) return true;
-        if (s.status !== "upcoming") return false;
-        // Hide open shifts whose end time has already passed — they are no
-        // longer claimable and should not appear in the officer's feed.
-        if (new Date(s.endTime).getTime() < nowMs) return false;
-        if (myMaxLevel < s.requiredLicenseLevel) return false;
-        if ((countMap.get(s.id) ?? 0) >= s.headcount) return false;
         const req = s.siteId ? (siteReqMap.get(s.siteId) ?? []) : [];
-        for (const t of req) if (!myHeldTrainings.has(t)) return false;
-        return true;
+        return evaluateShiftEligibility({
+          shift: s,
+          officer: { effectiveLevel: myMaxLevel, heldTrainings: myHeldTrainings },
+          assigned: false,
+          assignedCount: countMap.get(s.id) ?? 0,
+          requiredTrainings: req,
+          now,
+        }).eligible;
       });
     }
   } else {
@@ -315,7 +302,7 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     startTime, endTime,
     payRate, billRate, hourlyRate, billableRate,
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
-    siteRateId, shiftType,
+    siteRateId, shiftType, claimableFrom,
   } = req.body;
   // Site managers never see or set rates; ignore any client-supplied rate
   // fields and fall back to the site's configured defaults so payroll/invoicing
@@ -378,6 +365,17 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     ? (Number(siteDefaultBill) || 0)
     : (billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0));
 
+  // Parse claimableFrom: null means no scheduled release; undefined/absent is treated the same.
+  // A future ISO timestamp schedules the release. "now" / past ISO = immediate (store null).
+  let resolvedClaimableFrom: Date | null = null;
+  if (claimableFrom != null && claimableFrom !== "" && claimableFrom !== "null") {
+    const cf = new Date(claimableFrom);
+    if (!Number.isNaN(cf.getTime()) && cf.getTime() > Date.now()) {
+      resolvedClaimableFrom = cf;
+    }
+    // past/present → treat as immediate release (null = no scheduled future gate)
+  }
+
   const [shift] = await db.insert(shiftsTable).values({
     title,
     siteId: siteId || null,
@@ -405,6 +403,11 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     // anything else is a standard patrol/static shift. Server-side allowlist —
     // never trust an arbitrary client string.
     shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
+    // Scheduled release: when set, officers cannot see/claim this shift until
+    // the timestamp passes. The notification job announces it at that time.
+    claimableFrom: resolvedClaimableFrom,
+    // announcedAt: null — will be set by the scheduled-release job when it fires.
+    announcedAt: null,
   }).returning();
 
   if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -413,35 +416,39 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     );
   }
 
-  // Broadcast push notification to all qualifying active employees
-  try {
-    const candidates = await db
-      .select({
-        userId: usersTable.id,
-        effLevel: effectiveLevelSql,
-      })
-      .from(usersTable)
-      .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
-      .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-      .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
-      .groupBy(usersTable.id);
+  // Broadcast push notification to all qualifying active employees.
+  // Skip when a future release is scheduled — the notification job will fire
+  // when claimableFrom arrives. Null release (no scheduled gate) announces now.
+  if (shift.claimableFrom == null) {
+    try {
+      const candidates = await db
+        .select({
+          userId: usersTable.id,
+          effLevel: effectiveLevelSql,
+        })
+        .from(usersTable)
+        .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+        .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
+        .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
+        .groupBy(usersTable.id);
 
-    const eligibleIds = candidates
-      .filter((c) => c.effLevel >= lvl)
-      .map((c) => c.userId);
+      const eligibleIds = candidates
+        .filter((c) => c.effLevel >= lvl)
+        .map((c) => c.userId);
 
-    if (eligibleIds.length > 0) {
-      const { sendPushToUsers } = await import("../lib/push");
-      const start = fmtShiftWhen(shift.startTime);
-      const levelLabel = shiftLevelLabel(lvl);
-      await sendPushToUsers(eligibleIds, {
-        title: `🛡️ New ${levelLabel} Shift Available`,
-        body: `${shift.title} @ ${shift.clientName} — ${start}`,
-        data: { type: "shift_available", shiftId: shift.id },
-      });
+      if (eligibleIds.length > 0) {
+        const { sendPushToUsers } = await import("../lib/push");
+        const start = fmtShiftWhen(shift.startTime);
+        const levelLabel = shiftLevelLabel(lvl);
+        await sendPushToUsers(eligibleIds, {
+          title: `🛡️ New ${levelLabel} Shift Available`,
+          body: `${shift.title} @ ${shift.clientName} — ${start}`,
+          data: { type: "shift_available", shiftId: shift.id },
+        });
+      }
+    } catch (err) {
+      req.log.warn({ err }, "Failed to broadcast new shift push");
     }
-  } catch (err) {
-    req.log.warn({ err }, "Failed to broadcast new shift push");
   }
 
   // Notify the site's managers that a new shift was posted at their site
@@ -723,6 +730,55 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   const { startDate, untilDate, daysOfWeek, startTime, endTime } = recurrence;
   const tz: string = typeof recurrence.tz === "string" && recurrence.tz ? recurrence.tz : "America/Chicago";
 
+  // --- Release mode ---
+  // recurrence.release: { mode: "immediate" | "fixed" | "rolling", ... }
+  //   immediate: claimableFrom = null (no gate; announce on creation)
+  //   fixed:     claimableFrom = wallTimeToUtc(release.date, release.time, tz)
+  //              same UTC instant for EVERY occurrence in the series.
+  //              release.date + release.time are wall-clock in recurrence.tz.
+  //   rolling:   claimableFrom per occurrence = occurrence.startTime - offsetMs
+  //              release.offsetHours (number) before each shift start.
+  //              Concrete per-occurrence timestamp, never shared.
+  // Absent or invalid release → defaults to immediate.
+  type ReleaseMode = "immediate" | "fixed" | "rolling";
+  const releaseRaw = recurrence.release as Record<string, unknown> | undefined;
+  const releaseMode: ReleaseMode =
+    releaseRaw?.mode === "fixed" ? "fixed"
+    : releaseRaw?.mode === "rolling" ? "rolling"
+    : "immediate";
+
+  let fixedClaimableFrom: Date | null = null;
+  let rollingOffsetMs = 0;
+
+  if (releaseMode === "fixed") {
+    // date + time in recurrence.tz (same rules as shift times for DST safety).
+    const relDate = typeof releaseRaw?.date === "string" ? releaseRaw.date : "";
+    const relTime = typeof releaseRaw?.time === "string" ? releaseRaw.time : "";
+    const dateRe2 = /^\d{4}-\d{2}-\d{2}$/;
+    const timeRe2 = /^\d{2}:\d{2}$/;
+    if (!dateRe2.test(relDate) || !timeRe2.test(relTime)) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "release.mode=fixed requires release.date (YYYY-MM-DD) and release.time (HH:MM) in recurrence.tz",
+      });
+      return;
+    }
+    const [ry, rm, rd] = relDate.split("-").map(Number);
+    const [rh, rmin] = relTime.split(":").map(Number);
+    fixedClaimableFrom = wallTimeToUtc(ry, rm, rd, rh, rmin, tz);
+  } else if (releaseMode === "rolling") {
+    const leadDays = Number(releaseRaw?.leadDays);
+    const offsetHours = Number.isFinite(leadDays) ? leadDays * 24 : Number(releaseRaw?.offsetHours);
+    if (!Number.isFinite(offsetHours) || offsetHours < 0) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "release.mode=rolling requires release.leadDays (non-negative number)",
+      });
+      return;
+    }
+    rollingOffsetMs = offsetHours * 60 * 60 * 1000;
+  }
+
   if (!title || !siteId) {
     res.status(400).json({ error: "Bad Request", message: "base.title and base.siteId required" });
     return;
@@ -887,28 +943,47 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     const freshForPos = occurrences.filter((o) => !existingKeys.has(`${posKey}|${o.startTime.getTime()}`));
     skippedExisting += occurrences.length - freshForPos.length;
     const seriesId = randomUUID();
-    return freshForPos.map((o) => ({
-      title,
-      siteId,
-      clientName: site.clientName ?? null,
-      location: site.address ?? site.name,
-      locationLat: site.lat ? String(site.lat) : null,
-      locationLng: site.lng ? String(site.lng) : null,
-      startTime: o.startTime,
-      endTime: o.endTime,
-      payRate: String(pos.pay),
-      billRate: String(pos.bill),
-      hourlyRate: String(pos.pay),
-      billableRate: String(pos.bill),
-      isRepeat: true,
-      repeatPattern,
-      seriesId,
-      notes: notes || null,
-      status: "upcoming" as const,
-      requiredLicenseLevel: pos.requiredLicenseLevel,
-      headcount: pos.headcount,
-      siteRateId: pos.siteRateId,
-    }));
+    const createdAt = new Date();
+    return freshForPos.map((o) => {
+      // Compute per-occurrence claimableFrom based on release mode.
+      let occClaimableFrom: Date = createdAt;
+      if (releaseMode === "fixed") {
+        // Same fixed UTC instant for every occurrence in the series.
+        occClaimableFrom = fixedClaimableFrom!;
+      } else if (releaseMode === "rolling") {
+        // Each occurrence releases independently: shift.startTime - offsetMs.
+        const cf = new Date(o.startTime.getTime() - rollingOffsetMs);
+        occClaimableFrom = cf;
+      }
+      // Immediate recurring rows use their creation instant. They are already
+      // claimable, while still remaining distinguishable from legacy NULL rows
+      // that must never generate an announcement.
+
+      return {
+        title,
+        siteId,
+        clientName: site.clientName ?? null,
+        location: site.address ?? site.name,
+        locationLat: site.lat ? String(site.lat) : null,
+        locationLng: site.lng ? String(site.lng) : null,
+        startTime: o.startTime,
+        endTime: o.endTime,
+        payRate: String(pos.pay),
+        billRate: String(pos.bill),
+        hourlyRate: String(pos.pay),
+        billableRate: String(pos.bill),
+        isRepeat: true,
+        repeatPattern,
+        seriesId,
+        notes: notes || null,
+        status: "upcoming" as const,
+        requiredLicenseLevel: pos.requiredLicenseLevel,
+        headcount: pos.headcount,
+        siteRateId: pos.siteRateId,
+        claimableFrom: occClaimableFrom,
+        announcedAt: null,
+      };
+    });
   });
 
   const inserted = allToInsert.length > 0
@@ -995,6 +1070,22 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   if (typeof changes.status === "string" && ["upcoming", "active", "completed", "cancelled"].includes(changes.status)) {
     setCommon.status = changes.status;
   }
+  const releaseNow = changes.releaseNow === true;
+  // claimableFrom in bulk: null resets with no announcement; any valid instant
+  // is retained so a past/now change is announced by the daytime runner.
+  if ("claimableFrom" in changes) {
+    const cf = changes.claimableFrom;
+    if (cf === null || cf === "" || cf === "null") {
+      setCommon.claimableFrom = null;
+      setCommon.announcedAt = null;
+    } else if (typeof cf === "string") {
+      const parsed = new Date(cf);
+      if (!Number.isNaN(parsed.getTime())) {
+        setCommon.claimableFrom = parsed;
+        setCommon.announcedAt = null;
+      }
+    }
+  }
 
   const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return; }
@@ -1003,6 +1094,10 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   await db.transaction(async (tx) => {
     for (const r of rows) {
       const patch: Record<string, unknown> = { ...setCommon };
+      if (releaseNow && r.claimableFrom && new Date(r.claimableFrom).getTime() > Date.now()) {
+        patch.claimableFrom = new Date();
+        patch.announcedAt = null;
+      }
       if (newStart || newEnd) {
         // Anchor on the existing start day as observed in `tz`.
         const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
@@ -1198,7 +1293,7 @@ router.get("/shifts/:id", requireStaff, async (req, res): Promise<void> => {
 
 router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId, shiftType } = req.body;
+  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId, shiftType, claimableFrom } = req.body;
   // Site managers must not change rates — ignore any rate fields they submit.
   const isSiteManager = req.user!.role === "site_manager";
 
@@ -1266,6 +1361,24 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   // Allowlisted shift-type toggle (standard ↔ ppo_detail); anything else ignored.
   if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
 
+  // claimableFrom: null explicitly clears the release gate with no announcement.
+  // ISO string: parse and retain; past/now values are claimable and announced
+  // by the same runner as scheduled releases.
+  // undefined: leave existing value untouched.
+  if ("claimableFrom" in req.body) {
+    if (claimableFrom === null || claimableFrom === "" || claimableFrom === "null") {
+      // Explicit null reset: remove scheduling; announcedAt also cleared (no future announce).
+      updates.claimableFrom = null;
+      updates.announcedAt = null;
+    } else {
+      const cf = new Date(claimableFrom);
+      if (!Number.isNaN(cf.getTime())) {
+        updates.claimableFrom = cf;
+        updates.announcedAt = null;
+      }
+    }
+  }
+
   // A site manager moving a shift to a DIFFERENT managed site must not carry the
   // previous site's admin-set finance onto the new site/client. Recompute pay/bill
   // from the DESTINATION site defaults when available, otherwise 0 — an admin can
@@ -1305,6 +1418,53 @@ router.delete("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promis
   res.sendStatus(204);
 });
 
+/**
+ * POST /shifts/:id/release
+ *
+ * Immediately release a shift for claiming:
+ *   - Sets claimableFrom = now (no future gate)
+ *   - Clears announcedAt so the scheduled-announcement job can claim it once.
+ *
+ * Call this when a previously-scheduled shift should open NOW regardless of
+ * its original claimableFrom schedule. The scheduled runner handles batching
+ * and the business-hours hold consistently with time-based releases.
+ *
+ * Admin / dispatcher only.
+ */
+router.post("/shifts/:id/release", requireSchedulingStaff, async (req, res): Promise<void> => {
+  const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const now = new Date();
+  const [current] = await db
+    .select({ siteId: shiftsTable.siteId, claimableFrom: shiftsTable.claimableFrom })
+    .from(shiftsTable)
+    .where(eq(shiftsTable.id, shiftId));
+  if (!current) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }
+  if (
+    req.user!.role === "site_manager"
+    && !(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, current.siteId))
+  ) {
+    res.status(403).json({ error: "Forbidden", message: "You can only release shifts at sites you manage." });
+    return;
+  }
+  if (!current.claimableFrom || new Date(current.claimableFrom).getTime() <= now.getTime()) {
+    res.status(409).json({ error: "Conflict", message: "This shift is already open for claiming." });
+    return;
+  }
+  const [shift] = await db
+    .update(shiftsTable)
+    .set({ claimableFrom: now, announcedAt: null, syncSource: "local" })
+    .where(and(eq(shiftsTable.id, shiftId), gt(shiftsTable.claimableFrom, now)))
+    .returning();
+
+  if (!shift) {
+    res.status(409).json({ error: "Conflict", message: "This shift is already open for claiming." });
+    return;
+  }
+
+  void pushShiftUpsert(shift);
+  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, claimableFrom: now, announcedAt: null, assignments: [] }));
+});
+
 router.post("/shifts/:id/claim", requireStaff, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const userId = req.user!.userId;
@@ -1316,40 +1476,66 @@ router.post("/shifts/:id/claim", requireStaff, async (req, res): Promise<void> =
     return;
   }
 
-  const myLevel = await getEffectiveLevel(userId);
-  if (myLevel < shift.requiredLicenseLevel) {
+  // Reject claims for shifts whose scheduled release hasn't arrived yet.
+  // Assigned officers can still see their shift but cannot self-claim if the
+  // shift was never in their claimable window (they were admin-assigned).
+  if (shift.claimableFrom != null && new Date(shift.claimableFrom).getTime() > Date.now()) {
+    const releaseAt = new Date(shift.claimableFrom).toLocaleString("en-US", {
+      timeZone: COMPANY_TZ,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    res.status(409).json({
+      error: "Conflict",
+      code: "not_yet_released",
+      message: `This shift isn't open for claiming yet. It becomes available on ${releaseAt} (Central).`,
+      claimableFrom: shift.claimableFrom,
+    });
+    return;
+  }
+
+  const [officer, assignmentRows, siteRows] = await Promise.all([
+    getOfficerEligibilityContext(userId),
+    db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId)),
+    shift.siteId
+      ? db
+          .select({ requiredTrainings: sitesTable.requiredTrainings })
+          .from(sitesTable)
+          .where(eq(sitesTable.id, shift.siteId))
+          .limit(1)
+      : Promise.resolve([]),
+  ]);
+  const eligibility = evaluateShiftEligibility({
+    shift,
+    officer,
+    assigned: assignmentRows.some((row) => row.employeeId === userId),
+    assignedCount: assignmentRows.length,
+    requiredTrainings: Array.isArray(siteRows[0]?.requiredTrainings) ? siteRows[0].requiredTrainings : [],
+  });
+  if (!eligibility.eligible && eligibility.reason === "license") {
     res.status(403).json({
       error: "Forbidden",
       message: shift.requiredLicenseLevel <= 1
         ? `This is a support shift — no licence is required. Your account isn't cleared to claim it yet; contact your administrator.`
-        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel <= 1 ? "none" : `Level ${myLevel}`}.`,
+        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${officer.effectiveLevel <= 1 ? "none" : `Level ${officer.effectiveLevel}`}.`,
     });
     return;
   }
-  // Training compliance: if the site declares required training slugs,
-  // the officer must hold each one (unexpired). 403 with a precise
-  // "you're missing X, Y" so the officer can self-serve the fix from
-  // the mobile profile page.
-  if (shift.siteId) {
-    const [site] = await db
-      .select({ req: sitesTable.requiredTrainings })
-      .from(sitesTable)
-      .where(eq(sitesTable.id, shift.siteId))
-      .limit(1);
-    const required = Array.isArray(site?.req) ? site!.req : [];
-    if (required.length > 0) {
-      const held = await getEmployeeHeldTrainings(userId);
-      const missing = required.filter((t) => !held.has(t));
-      if (missing.length > 0) {
-        res.status(403).json({
-          error: "Forbidden",
-          code: "missing_training",
-          message: `This site requires training you don't currently hold: ${missing.join(", ")}. Upload the certificate from Profile → My training.`,
-          missingTrainings: missing,
-        });
-        return;
-      }
-    }
+  if (!eligibility.eligible && eligibility.reason === "training") {
+    const missing = eligibility.missingTrainings ?? [];
+    res.status(403).json({
+      error: "Forbidden",
+      code: "missing_training",
+      message: `This site requires training you don't currently hold: ${missing.join(", ")}. Upload the certificate from Profile → My training.`,
+      missingTrainings: missing,
+    });
+    return;
   }
 
   // Race-safe atomic claim: lock the parent shift row inside a transaction so
@@ -1489,36 +1675,39 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
 
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }
+  if (shift.claimableFrom && new Date(shift.claimableFrom).getTime() > Date.now()) {
+    const releaseAt = new Date(shift.claimableFrom).toLocaleString("en-US", {
+      timeZone: COMPANY_TZ,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    res.status(409).json({
+      error: "Conflict",
+      code: "not_yet_released",
+      message: `This shift opens for claiming on ${releaseAt}.`,
+      claimableFrom: new Date(shift.claimableFrom).toISOString(),
+    });
+    return;
+  }
 
   const filledRes = await db.execute(sql`
-    SELECT COUNT(*)::int AS c, ARRAY_AGG(employee_id) AS ids
+    SELECT COUNT(*)::int AS c
     FROM shift_assignments WHERE shift_id = ${shiftId}::uuid
   `);
   const filled: number = (filledRes as any).rows?.[0]?.c ?? 0;
-  const assignedIds: string[] = (filledRes as any).rows?.[0]?.ids ?? [];
   const vacanciesRemaining = Math.max(0, shift.headcount - filled);
   if (vacanciesRemaining === 0) {
     res.status(409).json({ error: "Conflict", message: "This shift is already fully staffed" });
     return;
   }
 
-  // Find active employees whose highest unexpired licence covers the requirement
-  // and who aren't already assigned to this shift.
-  const candidates = await db
-    .select({
-      userId: usersTable.id,
-      effLevel: effectiveLevelSql,
-    })
-    .from(usersTable)
-    .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
-    .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
-    .groupBy(usersTable.id);
-
-  const assignedSet = new Set(assignedIds.filter(Boolean));
-  const targetIds = candidates
-    .filter((c) => c.effLevel >= shift.requiredLicenseLevel && !assignedSet.has(c.userId))
-    .map((c) => c.userId);
+  // Use the same effective licence, required training, roster, headcount, and
+  // release checks as the worker feed, claim route, and scheduled announcer.
+  const targetIds = await getEligibleOfficerIds(shift);
 
   if (targetIds.length > 0) {
     try {

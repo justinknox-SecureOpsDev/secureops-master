@@ -49,6 +49,19 @@ export const shiftsTable = pgTable("shifts", {
   externalSource: text("external_source"),
   externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
   syncSource: text("sync_source").notNull().default("local"),
+  // Scheduled-release: when this shift becomes claimable (visible in feeds and
+  // open for self-claim). NULL means immediately claimable. Newly-created
+  // recurring rows use a concrete timestamp so the announcement runner can
+  // distinguish them from legacy rows, which must never trigger an alert.
+  // A future timestamp means the shift is on the schedule but officers cannot
+  // yet see or claim it. The notification job stamps announcedAt when it fires
+  // the "shift is now open" alert; re-scheduling clears announcedAt (null) so
+  // the alert can fire again at the new time.
+  claimableFrom: timestamp("claimable_from", { withTimezone: true }),
+  // Set by the scheduled-release job the first time it fires for this shift.
+  // NULL → never announced; non-null → announcement already sent (idempotent).
+  // Re-scheduling clears this so the job can fire at the new release time.
+  announcedAt: timestamp("announced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
@@ -60,6 +73,7 @@ export const shiftsTable = pgTable("shifts", {
   // and the row-position deep-link stay fully index-ordered at scale.
   startIdx: index("shifts_start_idx").on(t.startTime, t.id),
   seriesIdx: index("shifts_series_idx").on(t.seriesId),
+  releaseIdx: index("shifts_release_idx").on(t.claimableFrom, t.announcedAt),
   // Unique constraint on (externalSource, externalId) for atomic concurrent upserts.
   // NULL values do not violate uniqueness in Postgres, so local-only rows are safe.
   externalIdx: uniqueIndex("shifts_external_uniq").on(t.externalSource, t.externalId),

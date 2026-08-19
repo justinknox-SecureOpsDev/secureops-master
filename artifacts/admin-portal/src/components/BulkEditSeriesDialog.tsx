@@ -34,6 +34,10 @@ export function BulkEditSeriesDialog({
   const [headcount, setHeadcount] = useState("");
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(false);
+  // Scheduled-release edit: "" = leave unchanged, "clear" = open immediately,
+  // "at" = set every occurrence to a fixed release instant.
+  const [releaseMode, setReleaseMode] = useState<"" | "clear" | "at">("");
+  const [releaseAt, setReleaseAt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +45,7 @@ export function BulkEditSeriesDialog({
     if (open) {
       setStartTime(""); setEndTime(""); setPayRate(""); setBillRate("");
       setLicenseLevel(""); setHeadcount(""); setNotes(""); setIncludeNotes(false);
+      setReleaseMode(""); setReleaseAt("");
       setError(null);
     }
   }, [open]);
@@ -59,6 +64,12 @@ export function BulkEditSeriesDialog({
     if (licenseLevel) changes.requiredLicenseLevel = Number(licenseLevel);
     if (headcount !== "") changes.headcount = headcount;
     if (includeNotes) changes.notes = notes;
+    if (releaseMode === "clear") {
+      changes.releaseNow = true;
+    } else if (releaseMode === "at") {
+      if (!releaseAt) { setError("Pick a release date and time."); return; }
+      changes.claimableFrom = new Date(releaseAt).toISOString();
+    }
 
     if (Object.keys(changes).length <= 1) {
       setError("Pick at least one field to change.");
@@ -148,6 +159,32 @@ export function BulkEditSeriesDialog({
             </label>
             {includeNotes && (
               <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="New notes (empty clears them)" className="mt-2" />
+            )}
+          </div>
+
+          {/* Scheduled release — apply a claim window across the whole series */}
+          <div>
+            <Label>Release for claiming</Label>
+            <Select value={releaseMode || "__keep__"} onValueChange={(v) => setReleaseMode(v === "__keep__" ? "" : (v as "clear" | "at"))}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="unchanged" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__keep__">Leave unchanged</SelectItem>
+                <SelectItem value="clear">Open immediately (clear schedule)</SelectItem>
+                <SelectItem value="at">Set fixed release date &amp; time</SelectItem>
+              </SelectContent>
+            </Select>
+            {releaseMode === "at" && (
+              <Input
+                type="datetime-local"
+                value={releaseAt}
+                onChange={(e) => setReleaseAt(e.target.value)}
+                className="mt-2"
+              />
+            )}
+            {releaseMode === "at" && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Every occurrence in this series opens for claiming at this instant.
+              </p>
             )}
           </div>
 

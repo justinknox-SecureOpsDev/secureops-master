@@ -34,6 +34,20 @@ function plusDaysIso(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+// How occurrences become claimable by officers.
+//  - immediate: open the moment they're generated (default, legacy behaviour).
+//  - fixed:     open at one fixed wall-clock instant (a "drop" date/time).
+//  - rolling:   open N days before each occurrence's own start time.
+type ReleaseMode = "immediate" | "fixed" | "rolling";
+
+// datetime-local value → default one week out at 08:00, a sensible "drop" slot.
+function defaultFixedRelease(): string {
+  const d = new Date(Date.now() + 7 * 86_400_000);
+  d.setHours(8, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function RepeatingShiftDialog({
   open, onOpenChange, onCreated, isSiteManager = false,
 }: {
@@ -55,6 +69,11 @@ export function RepeatingShiftDialog({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Scheduled release — controls when generated occurrences open for claiming.
+  const [releaseMode, setReleaseMode] = useState<ReleaseMode>("immediate");
+  const [releaseAt, setReleaseAt] = useState<string>(defaultFixedRelease());
+  const [releaseLeadDays, setReleaseLeadDays] = useState<string>("7");
 
   // Multi-position staffing rows — each row becomes its own repeat series.
   const [staffingRows, setStaffingRows] = useState<StaffingRow[]>([newStaffingRow(2)]);
@@ -82,6 +101,7 @@ export function RepeatingShiftDialog({
     setTitle(""); setSiteId(""); setStartDate(todayIso()); setUntilDate(plusDaysIso(28));
     setDays([1, 2, 3, 4, 5]); setStartTime("09:00"); setEndTime("17:00");
     setNotes(""); setError(null);
+    setReleaseMode("immediate"); setReleaseAt(defaultFixedRelease()); setReleaseLeadDays("7");
     setSiteRates([]);
     setStaffingRows([newStaffingRow(2)]);
   };
@@ -97,6 +117,11 @@ export function RepeatingShiftDialog({
     if (days.length === 0) { setError("Pick at least one day of the week"); return; }
     if (untilDate < startDate) { setError("Until date must be on or after the start date"); return; }
     if (hasDuplicates) { setError("Remove duplicate positions before saving"); return; }
+    if (releaseMode === "fixed" && !releaseAt) { setError("Pick a release date and time"); return; }
+    if (releaseMode === "rolling") {
+      const lead = Number(releaseLeadDays);
+      if (!Number.isFinite(lead) || lead < 0) { setError("Release lead days must be a non-negative number"); return; }
+    }
     setSubmitting(true);
     try {
       const positions = staffingRows.map((r) => ({
@@ -106,6 +131,14 @@ export function RepeatingShiftDialog({
         billRate: Number(r.billRate) || 0,
         siteRateId: r.siteRateId || null,
       }));
+      const [releaseDate, releaseTime] = releaseAt.split("T");
+      const release =
+        releaseMode === "fixed"
+          ? { mode: "fixed" as const, date: releaseDate, time: releaseTime }
+          : releaseMode === "rolling"
+            ? { mode: "rolling" as const, leadDays: Math.max(0, Number(releaseLeadDays) || 0) }
+            : { mode: "immediate" as const };
+
       const result = await api<{ created: number; skippedExisting: number; totalOccurrences: number }>("/shifts/repeat", {
         method: "POST",
         body: {
@@ -118,6 +151,7 @@ export function RepeatingShiftDialog({
           recurrence: {
             startDate, untilDate, daysOfWeek: days, startTime, endTime,
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago",
+            release,
           },
         },
       });
@@ -244,6 +278,56 @@ export function RepeatingShiftDialog({
           <div>
             <Label>Notes</Label>
             <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+
+          {/* Scheduled release — when generated occurrences open for claiming */}
+          <div className="rounded-lg border border-brand-gold/40 bg-brand-cream/30 p-3 space-y-3">
+            <div>
+              <Label>Release for claiming</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Choose when officers can start claiming these shifts.
+              </p>
+            </div>
+            <Select value={releaseMode} onValueChange={(v) => setReleaseMode(v as ReleaseMode)}>
+              <SelectTrigger className="w-full sm:w-72"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="immediate">Immediately (open as soon as created)</SelectItem>
+                <SelectItem value="fixed">On a fixed date &amp; time</SelectItem>
+                <SelectItem value="rolling">A number of days before each shift</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {releaseMode === "fixed" && (
+              <div>
+                <Label>Release date &amp; time <span className="text-destructive">*</span></Label>
+                <Input
+                  type="datetime-local"
+                  value={releaseAt}
+                  onChange={(e) => setReleaseAt(e.target.value)}
+                  className="w-full sm:w-72"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Every occurrence in the series opens at this single instant.
+                </p>
+              </div>
+            )}
+
+            {releaseMode === "rolling" && (
+              <div>
+                <Label>Days before each shift <span className="text-destructive">*</span></Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={releaseLeadDays}
+                  onChange={(e) => setReleaseLeadDays(e.target.value)}
+                  className="w-full sm:w-40"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Each occurrence opens {Number(releaseLeadDays) || 0} day{Number(releaseLeadDays) === 1 ? "" : "s"} before its own start time.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="rounded-md bg-brand-cream/40 border border-brand-gold/30 px-3 py-2 text-sm">

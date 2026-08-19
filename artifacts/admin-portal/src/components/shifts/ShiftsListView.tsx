@@ -9,13 +9,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   ArrowUp, ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, Pencil,
-  Repeat, Trash2, Users, Shield, Loader2,
+  Repeat, Trash2, Users, Shield, Loader2, Timer,
 } from "lucide-react";
 import { Link } from "wouter";
 import {
   Shift, ShiftFilters, applyFilters, filledCount, seriesKeyFor, siteLabelFor,
   fmtDateTime, fmtTimeOfDay, levelBadge, statusBadge, detectSeriesTimezoneIssue,
-  describeRepeatPattern, ONE_WEEK_MS, LOAD_MORE_PAGE,
+   describeRepeatPattern, releaseState, fmtReleaseTz, ONE_WEEK_MS, LOAD_MORE_PAGE,
 } from "./shared";
 
 type SortKey = "start" | "title" | "site" | "staffing" | "status";
@@ -456,6 +456,11 @@ export function ShiftsListView({
                         {s.isRepeat && <Repeat className="w-3 h-3 text-amber-700 shrink-0" aria-label="Repeating series" />}
                         <span className="font-medium">{s.title}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${lvl.cls}`}>{lvl.label}</span>
+                        {releaseState(s.claimableFrom) === "scheduled" && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold bg-sky-100 text-sky-800 border-sky-300">
+                            <Timer className="w-3 h-3" /> Opens {fmtReleaseTz(s.claimableFrom!)}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-3 py-2.5">

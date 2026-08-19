@@ -9,12 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Clock, MapPin, Users, Megaphone, UserPlus, Pencil, Repeat,
-  Ban, Trash2, Shield, Check, X, Loader2, DollarSign,
+  Ban, Trash2, Shield, Check, X, Loader2, DollarSign, Timer, Send,
 } from "lucide-react";
 import { AssignNearestDialog } from "@/components/AssignNearestDialog";
 import {
   Shift, filledCount, fmtDateLongTz, fmtTimeTz, levelBadge, statusBadge,
-  siteLabelFor, describeRepeatPattern,
+  siteLabelFor, describeRepeatPattern, releaseState, fmtReleaseTz,
 } from "./shared";
 
 type Props = {
@@ -65,6 +65,20 @@ export function ShiftDetailPanel({
     onError: (e) => setActionErr(e instanceof Error ? e.message : "Could not update claim."),
   });
 
+  // Release-now keeps a concrete due timestamp so the scheduled runner can
+  // batch and persist officer alerts. Never fall back to clearing the timestamp:
+  // that would open the shift without making it eligible for announcement.
+  const releaseMutation = useMutation({
+    mutationFn: (shiftId: string) =>
+      api(`/shifts/${shiftId}/release`, { method: "POST", body: {} }),
+    onSuccess: () => {
+      setNotifyMsg("Shift released — officers can claim it now.");
+      qc.invalidateQueries({ queryKey: ["shifts-area", "detail", shiftId] });
+      onChanged();
+    },
+    onError: (e) => setActionErr(e instanceof Error ? e.message : "Could not release shift."),
+  });
+
   // Loading state: show the sheet immediately with a lightweight skeleton so
   // slower networks still get instant visual feedback when a shift is opened.
   if (!shift) {
@@ -98,6 +112,7 @@ export function ShiftDetailPanel({
   const pending = (shift.assignments ?? []).filter((a) => a.status === "pending_approval");
   const patternDesc = shift.isRepeat ? describeRepeatPattern(shift.repeatPattern) : null;
   const isCancelled = shift.status === "cancelled";
+  const isScheduledRelease = releaseState(shift.claimableFrom) === "scheduled";
 
   return (
     <Sheet open={open} onOpenChange={(b) => { if (!b) { setNotifyMsg(null); setActionErr(null); } onOpenChange(b); }}>
@@ -114,6 +129,11 @@ export function ShiftDetailPanel({
               <Badge variant="outline" className={lvl.cls}>{lvl.label}</Badge>
               {shift.shiftType === "ppo_detail" && (
                 <Badge variant="outline" className="bg-indigo-100 text-indigo-800 border-indigo-300">PPO Detail</Badge>
+              )}
+              {isScheduledRelease && !isCancelled && (
+                <Badge variant="outline" className="bg-sky-100 text-sky-800 border-sky-300">
+                  <Timer className="w-3 h-3 mr-1" /> Releases {fmtReleaseTz(shift.claimableFrom!)}
+                </Badge>
               )}
               {openSlots > 0 && !isCancelled ? (
                 <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
@@ -157,6 +177,12 @@ export function ShiftDetailPanel({
               <div className="flex items-center gap-2">
                 <Repeat className="w-4 h-4 opacity-50 shrink-0" />
                 <span className="opacity-80">Repeats: {patternDesc}</span>
+              </div>
+            )}
+            {isScheduledRelease && (
+              <div className="flex items-center gap-2">
+                <Timer className="w-4 h-4 opacity-50 shrink-0" />
+                <span className="opacity-80">Opens for claiming: {fmtReleaseTz(shift.claimableFrom!)} CT</span>
               </div>
             )}
             {shift.notes && (
@@ -228,12 +254,25 @@ export function ShiftDetailPanel({
                 <Repeat className="w-3.5 h-3.5 mr-1.5" /> Edit series
               </Button>
             )}
+            {!isCancelled && isScheduledRelease && (
+              <Button
+                variant="outline" size="sm"
+                className="text-sky-700 border-sky-300 hover:bg-sky-50"
+                disabled={releaseMutation.isPending}
+                onClick={() => { setNotifyMsg(null); setActionErr(null); releaseMutation.mutate(shift.id); }}
+              >
+                {releaseMutation.isPending
+                  ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  : <Send className="w-3.5 h-3.5 mr-1.5" />}
+                Release now
+              </Button>
+            )}
             {!isCancelled && (
               <>
                 <Button variant="outline" size="sm" onClick={() => setAssignOpen(true)}>
                   <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Assign officer
                 </Button>
-                {openSlots > 0 && (
+                {openSlots > 0 && !isScheduledRelease && (
                   <Button
                     variant="outline" size="sm"
                     disabled={notifyMutation.isPending}

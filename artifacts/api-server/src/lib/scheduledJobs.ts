@@ -22,13 +22,19 @@ import {
 import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail, renderCoiExpiryEmail } from "./email";
 import { brand } from "./brandConfig";
-import { sendPushToUsers } from "./push";
+import {
+  persistInAppNotifications,
+  sendPushOnlyToUsers,
+  sendPushToUsers,
+  type InAppNotificationDelivery,
+} from "./push";
 import { sendSmsToUsers } from "./sms";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
 import { lockEndedWeekInvoices, weekStartIsoBusiness } from "./invoiceSync";
 import { isSchedulerConfigured, fetchSchedulerDelta } from "./schedulerSync";
 import { getSiteManagerUserIds } from "./siteManagerAuthz";
 import { businessTimeZone, businessDateToUtc } from "./businessTime";
+import { getEligibleOfficerIds } from "./shiftEligibility";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -661,6 +667,39 @@ export async function sendPendingClaimReminders(): Promise<void> {
   }
 }
 
+/**
+ * Scheduled-shift release announcements.
+ *
+ * Fires for every shift where:
+ *   - claimableFrom IS NOT NULL and <= now  (release time has arrived)
+ *   - announcedAt IS NULL                   (not yet announced)
+ *   - status = 'upcoming'                   (active shift)
+ *   - endTime > now                         (hasn't already ended)
+ *
+ * For each qualifying row the job:
+ *   1. Atomically stamps announcedAt = now via UPDATE…RETURNING so two
+ *      overlapping ticks or instances never double-announce the same shift.
+ *   2. Computes eligible officers (level, training, not already assigned,
+ *      not full) using the shared eligibility helper.
+ *   3. Daytime hold: if the tick falls outside 08:00–20:00 in the business
+ *      timezone, visibility release still happened (claimableFrom passed) but
+ *      the push/in-app notification is deferred — the shift shows in the feed
+ *      but no alert fires until the next business-hours tick.
+ *   4. Groups notifications per officer/site so each officer receives a single
+ *      push summarising all shifts opening at the same site (count, site name,
+ *      earliest start time).
+ *
+ * Shift rows with null claimableFrom never enter this path; they were either
+ * immediate-release (announced at creation) or admin-only (no announcement).
+ *
+ * Runs every 5 minutes. Idempotent: the atomic UPDATE means a slow tick
+ * and a new tick cannot double-stamp. Cross-instance safe: only the writer
+ * that advances announcedAt (from null) sends the notification.
+ */
+type ShiftAnnouncementDeps = {
+  persistNotifications?: typeof persistInAppNotifications;
+  sendDevicePush?: typeof sendPushOnlyToUsers;
+};
 /**
  * Unconfirmed time-entry reminder. Officers must review + confirm their
  * recorded times after clock-out before an entry enters the admin approval
@@ -2068,6 +2107,11 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // Pre-shift reminders — every 5 minutes is the right cadence for the
   // 30-minute window without being too chatty.
   schedule("shift-reminders", sendPreShiftReminders, 5 * MIN_MS);
+  // Scheduled-shift release announcements — every 5 minutes so officers
+  // receive their alert close to the configured claimableFrom time.
+  // Daytime-held: outside 08:00-20:00 business hours the job defers push
+  // until the next business-hours tick (visibility still released on time).
+  schedule("shift-announce", announceScheduledShifts, 5 * MIN_MS);
   // Missed-checkpoint pages — every 5 minutes; debounced per active shift.
   schedule("missed-checkpoints", checkMissedPatrolCheckpoints, 5 * MIN_MS);
   // High-risk self-edit digest — every 5 minutes. The 15-min coalescing
@@ -2218,5 +2262,172 @@ export async function runSchedulerReconciliation(): Promise<void> {
       { since, nextCursor, ...counts },
       "[scheduler-reconcile] delta applied",
     );
+  }
+}
+
+export async function announceScheduledShifts(
+  now: Date = new Date(),
+  deps: ShiftAnnouncementDeps = {},
+): Promise<void> {
+  try {
+    const persistNotifications = deps.persistNotifications ?? persistInAppNotifications;
+    const sendDevicePush = deps.sendDevicePush ?? sendPushOnlyToUsers;
+    const bizTz = businessTimeZone();
+
+    // Daytime hold: only send push alerts between 08:00 and 20:00 business time.
+    const hourInBiz = (() => {
+      const dtf = new Intl.DateTimeFormat("en-US", {
+        timeZone: bizTz, hour: "numeric", hour12: false,
+      });
+      return Number(dtf.format(now));
+    })();
+    const isBusinessHours = hourInBiz >= 8 && hourInBiz < 20;
+
+    // Do not claim rows at night: they remain due and are atomically claimed
+    // by the first instance that runs in the next daytime window.
+    if (!isBusinessHours) return;
+
+    // One atomic UPDATE…RETURNING claims the whole due batch. A second process
+    // sees no rows with announcedAt IS NULL and therefore cannot double-send.
+    const claimedRows = await db
+      .update(shiftsTable)
+      .set({ announcedAt: now })
+      .where(and(
+        eq(shiftsTable.status, "upcoming"),
+        isNull(shiftsTable.announcedAt),
+        sql`${shiftsTable.claimableFrom} IS NOT NULL`,
+        lte(shiftsTable.claimableFrom, now),
+        gt(shiftsTable.endTime, now),
+      ))
+      .returning();
+    if (claimedRows.length === 0) return;
+
+    const siteIds = Array.from(new Set(claimedRows.map((row) => row.siteId).filter((id): id is string => !!id)));
+    const siteRows = siteIds.length > 0
+      ? await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(inArray(sitesTable.id, siteIds))
+      : [];
+    const siteNames = new Map(siteRows.map((site) => [site.id, site.name]));
+    const due = claimedRows.map((row) => ({ ...row, siteName: row.siteId ? siteNames.get(row.siteId) ?? null : null }));
+
+    // Per-shift isolation: claim each row atomically, then process it.
+    // A failure on one row does NOT abort the others.
+    // Collect (officerId → shifts[]) grouped by officer for batched push.
+    const officerShiftMap = new Map<string, Array<typeof due[number]>>();
+
+    const eligibilityFailures: string[] = [];
+    for (const shift of due) {
+      let eligibleIds: string[] = [];
+      try {
+        eligibleIds = await getEligibleOfficerIds(shift);
+      } catch (err) {
+        logger.warn({ err, shiftId: shift.id }, "[announce-shifts] eligibility check failed; releasing claim for retry");
+        eligibilityFailures.push(shift.id);
+        continue;
+      }
+
+      // Group shifts by officer for batched push (one push/in-app per officer).
+      for (const uid of eligibleIds) {
+        if (!officerShiftMap.has(uid)) officerShiftMap.set(uid, []);
+        officerShiftMap.get(uid)!.push(shift);
+      }
+    }
+    if (eligibilityFailures.length > 0) {
+      await db
+        .update(shiftsTable)
+        .set({ announcedAt: null })
+        .where(and(
+          inArray(shiftsTable.id, eligibilityFailures),
+          eq(shiftsTable.announcedAt, now),
+        ));
+    }
+
+    if (officerShiftMap.size === 0) return;
+
+    // Fire one batched push per officer, grouped by site.
+    // Each officer gets one notification per site mentioning how many shifts opened.
+    const deliveries: Array<InAppNotificationDelivery & { shiftIds: string[] }> = [];
+    for (const [officerId, shifts] of officerShiftMap) {
+      // Group by siteId (null siteId is its own group).
+      const bySite = new Map<string | null, typeof shifts>();
+      for (const s of shifts) {
+        const key = s.siteId ?? null;
+        if (!bySite.has(key)) bySite.set(key, []);
+        bySite.get(key)!.push(s);
+      }
+
+      for (const [, siteShifts] of bySite) {
+        const count = siteShifts.length;
+        const earliest = siteShifts.reduce((a, b) =>
+          new Date(a.startTime).getTime() < new Date(b.startTime).getTime() ? a : b
+        );
+        const siteName = earliest.siteName ?? earliest.clientName ?? earliest.location ?? null;
+        const startTxt = new Date(earliest.startTime).toLocaleString("en-US", {
+          timeZone: bizTz, weekday: "short", month: "short", day: "numeric",
+          hour: "2-digit", minute: "2-digit",
+        });
+        const levelLabel = (() => {
+          const lvl = earliest.requiredLicenseLevel;
+          if (lvl <= 1) return "Support";
+          if (lvl === 4) return "L4/PPO";
+          return `L${lvl}+`;
+        })();
+
+        const title = count === 1
+          ? `🛡️ ${levelLabel} Shift Now Available`
+          : `🛡️ ${count} ${levelLabel} Shifts Now Available`;
+        const body = siteName
+          ? `${count === 1 ? earliest.title : `${count} shifts`} @ ${siteName} — earliest ${startTxt}. Tap to claim.`
+          : `${count === 1 ? earliest.title : `${count} shifts`} — earliest ${startTxt}. Tap to claim.`;
+
+        deliveries.push({
+          userIds: [officerId],
+          shiftIds: siteShifts.map((shift) => shift.id),
+          notification: {
+            title,
+            body,
+            data: {
+              type: "shift_available",
+              shiftId: count === 1 ? earliest.id : undefined,
+              count: String(count),
+              siteId: earliest.siteId ?? undefined,
+              claimableFrom: earliest.claimableFrom ? new Date(earliest.claimableFrom).toISOString() : undefined,
+            },
+          },
+        });
+      }
+    }
+
+    // The in-app rows for the entire claimed batch are one atomic insert. If
+    // persistence fails, release every claim: no partial rows exist, so a retry
+    // cannot duplicate a successful group.
+    try {
+      await persistNotifications(deliveries);
+    } catch (err) {
+      await db
+        .update(shiftsTable)
+        .set({ announcedAt: null })
+        .where(and(
+          inArray(shiftsTable.id, claimedRows.map((row) => row.id)),
+          eq(shiftsTable.announcedAt, now),
+        ))
+        .catch((resetErr) => logger.error({ err: resetErr }, "[announce-shifts] failed to release claims after persistence error"));
+      logger.error({ err }, "[announce-shifts] in-app notification persistence failed; batch released for retry");
+      return;
+    }
+
+    // Device push is best-effort after the durable in-app batch exists. This
+    // avoids duplicate in-app rows when Expo accepts a chunk but its response
+    // is lost. Users always retain the notification in their history.
+    for (const delivery of deliveries) {
+      try {
+        await sendDevicePush(delivery.userIds, delivery.notification);
+      } catch (err) {
+        logger.warn({ err, userIds: delivery.userIds }, "[announce-shifts] device push failed after durable in-app delivery");
+      }
+    }
+
+    logger.info({ announced: due.length - eligibilityFailures.length, officers: officerShiftMap.size }, "[announce-shifts] completed");
+  } catch (err) {
+    logger.error({ err }, "[announce-shifts] job failed");
   }
 }

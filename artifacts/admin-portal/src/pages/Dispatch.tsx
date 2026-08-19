@@ -17,7 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
   ShieldAlert, UserCheck, Users, Megaphone, Loader2, RefreshCw, Wifi, WifiOff,
-  HelpCircle, X, Settings2, Maximize2, Minimize2, GripVertical,
+  HelpCircle, X, Settings2, Maximize2, Minimize2, GripVertical, Timer,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
@@ -80,6 +80,7 @@ type OpenShift = {
   filled: number;
   requiredLicenseLevel: number;
   payRate: string | null;
+  claimableFrom: string | null;
 };
 
 type Incident = {
@@ -1609,6 +1610,7 @@ function OpenShiftsPanel({
                 const isSelected = shift.id === selectedShiftId;
                 const isDragOver = shift.id === dragOverShiftId;
                 const isAssigning = shift.id === assigningShiftId;
+                const isUnreleased = !!shift.claimableFrom && new Date(shift.claimableFrom).getTime() > Date.now();
                 return (
                   <div
                     key={shift.id}
@@ -1656,6 +1658,19 @@ function OpenShiftsPanel({
                           <span>· L{shift.requiredLicenseLevel}+</span>
                           {shift.payRate && <span>· ${shift.payRate}/hr</span>}
                         </div>
+                        {isUnreleased && (
+                          <div className="mt-1 inline-flex items-center gap-1 rounded border border-sky-300 bg-sky-100 px-1.5 py-0.5 text-xs font-medium text-sky-800">
+                            <Timer className="w-3 h-3" />
+                            Opens {new Date(shift.claimableFrom!).toLocaleString("en-US", {
+                              timeZone: "America/Chicago",
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })} CT
+                          </div>
+                        )}
                         {isDragOver && (
                           <div className="text-xs text-brand-gold font-semibold mt-1 animate-pulse">
                             ↓ Drop to assign

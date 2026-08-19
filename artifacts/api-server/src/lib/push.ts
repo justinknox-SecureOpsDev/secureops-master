@@ -5,6 +5,17 @@ import { logger } from "./logger";
 
 const expo = new Expo();
 
+export type PushNotificationPayload = {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+};
+
+export type InAppNotificationDelivery = {
+  userIds: string[];
+  notification: PushNotificationPayload;
+};
+
 /**
  * Admin mobile tab names referenced in push-notification and SMS body strings.
  *
@@ -46,7 +57,7 @@ export const SMS_GEOFENCE_MAP_PROMPT = `Check ${ADMIN_TAB_LIVE_MAP}.` as const;
 
 export async function sendPushToUsers(
   userIds: string[],
-  notification: { title: string; body: string; data?: Record<string, unknown> },
+  notification: PushNotificationPayload,
 ) {
   if (!userIds.length) return;
 
@@ -55,22 +66,40 @@ export async function sendPushToUsers(
   // screen, /me/notifications). This is independent of push delivery —
   // users without an Expo token, with revoked permissions, or whose push
   // chunk fails still see a record of what was sent to them.
-  const dedupedIds = Array.from(new Set(userIds));
-  const type = typeof notification.data?.type === "string" ? notification.data.type : "general";
   try {
-    await db.insert(notificationsTable).values(
-      dedupedIds.map((uid) => ({
-        userId: uid,
-        type,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data ?? null,
-      })),
-    );
+    await persistInAppNotifications([{ userIds, notification }]);
   } catch (err) {
     logger.error({ err }, "Failed to persist notifications");
   }
+  await sendPushOnlyToUsers(userIds, notification);
+}
 
+/**
+ * Persist a complete notification batch atomically. Unlike sendPushToUsers,
+ * this deliberately throws on failure so scheduled jobs can release their
+ * atomic claim and retry without silently losing the in-app alert.
+ */
+export async function persistInAppNotifications(deliveries: InAppNotificationDelivery[]): Promise<void> {
+  const rows = deliveries.flatMap(({ userIds, notification }) => {
+    const type = typeof notification.data?.type === "string" ? notification.data.type : "general";
+    return Array.from(new Set(userIds)).map((userId) => ({
+      userId,
+      type,
+      title: notification.title,
+      body: notification.body,
+      data: notification.data ?? null,
+    }));
+  });
+  if (rows.length > 0) await db.insert(notificationsTable).values(rows);
+}
+
+/** Send device pushes without creating a second in-app notification row. */
+export async function sendPushOnlyToUsers(
+  userIds: string[],
+  notification: PushNotificationPayload,
+): Promise<void> {
+  if (!userIds.length) return;
+  const dedupedIds = Array.from(new Set(userIds));
   const users = await db
     .select({ id: usersTable.id, expoPushToken: usersTable.expoPushToken })
     .from(usersTable)

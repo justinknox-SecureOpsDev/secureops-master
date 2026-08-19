@@ -25,6 +25,9 @@ export type Shift = {
   notes: string | null;
   shiftType?: "standard" | "ppo_detail" | string | null;
   siteRateId?: string | null;
+  // Scheduled release: the instant a shift becomes claimable by officers.
+  // null / past ⇒ already open; a future value ⇒ embargoed until then.
+  claimableFrom?: string | null;
   assignments: ShiftAssignment[];
 };
 
@@ -170,6 +173,28 @@ export function levelBadge(level: number): { label: string; cls: string } {
   if (level === 3) return { label: "L3 Armed", cls: "bg-amber-100 text-amber-800 border-amber-300" };
   if (level <= 1) return { label: "Support", cls: "bg-slate-100 text-slate-600 border-slate-300" };
   return { label: "L2", cls: "bg-slate-100 text-slate-700 border-slate-300" };
+}
+
+/**
+ * Scheduled-release state for a shift's `claimableFrom` instant.
+ * - "open"     ⇒ no embargo (null / blank) or the release time has passed.
+ * - "scheduled" ⇒ release is set to a future instant; officers can't claim yet.
+ */
+export function releaseState(claimableFrom: string | null | undefined): "open" | "scheduled" {
+  if (!claimableFrom) return "open";
+  const t = new Date(claimableFrom).getTime();
+  if (Number.isNaN(t)) return "open";
+  return t > Date.now() ? "scheduled" : "open";
+}
+
+/** Human "Releases <date/time>" label for a future claimableFrom instant. */
+export function fmtReleaseTz(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    timeZone: COMPANY_TZ, month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
 }
 
 export function statusBadge(status: string): string {
