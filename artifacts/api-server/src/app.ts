@@ -93,6 +93,10 @@ const CSP_DIRECTIVES = {
     "https://*.tile.openstreetmap.org",
     ...ORG_DIRECTORY_CONNECT_SRC,
   ],
+  // The agreement review & sign page embeds the uploaded agreement PDF. It is
+  // fetched with the admin's bearer token and handed to the <iframe> as a
+  // blob: URL, so signing shows the actual document rather than a link.
+  frameSrc: ["'self'", "blob:"],
   frameAncestors: ["'none'"],
   baseUri: ["'self'"],
   formAction: ["'self'"],

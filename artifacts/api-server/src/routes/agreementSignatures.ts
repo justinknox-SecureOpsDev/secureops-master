@@ -33,11 +33,20 @@ import {
   fillAgreement,
   type AgreementSlot,
 } from "@workspace/legal-docs";
-import { renderLegalPdf } from "@workspace/legal-docs/pdf";
+import { renderLegalPdf, pdfToBuffer, type SignatureCertificate } from "@workspace/legal-docs/pdf";
+import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import { requireAdmin } from "../middlewares/auth";
 import { businessTimeZone } from "../lib/businessTime";
+import { ObjectStorageService } from "../lib/objectStorage";
+import {
+  MAX_AGREEMENT_PDF_BYTES,
+  readActiveAgreementDocument,
+  type ActiveAgreementDocument,
+} from "../lib/agreementDocs";
 
 const router: Router = Router();
+
+const storage = new ObjectStorageService();
 
 function parseSlot(raw: string): AgreementSlot | null {
   return (AGREEMENT_SLOTS as readonly string[]).includes(raw) ? (raw as AgreementSlot) : null;
@@ -144,6 +153,7 @@ function missingProviderDefs(slot: AgreementSlot, values: Record<string, string>
 function termsDigest(slot: AgreementSlot, values: Record<string, string>): string {
   const canonical = JSON.stringify({
     slot,
+    source: "template",
     values: providerDefs(slot).map((def) => [def.key, values[def.key] ?? ""]),
     // The document text is itself a term: covering the template and consent
     // wording means a stale portal bundle can't sign a version of the
@@ -151,6 +161,25 @@ function termsDigest(slot: AgreementSlot, values: Record<string, string>): strin
     template: LEGAL_TEMPLATES[slot],
     consent: AGREEMENT_CONSENT_TEXTS[slot],
     guarantyConsent: slot === "msa" ? GUARANTY_CONSENT_TEXT : null,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/**
+ * Digest for a slot governed by an uploaded PDF. The document hash IS the
+ * term here, so replacing the uploaded document between page load and
+ * signature is rejected the same way changed template terms are.
+ */
+function uploadedTermsDigest(
+  slot: AgreementSlot,
+  doc: Extract<ActiveAgreementDocument, { source: "uploaded" }>,
+): string {
+  const canonical = JSON.stringify({
+    slot,
+    source: "uploaded",
+    documentSha256: doc.documentSha256,
+    fileName: doc.fileName,
+    consent: AGREEMENT_CONSENT_TEXTS[slot],
   });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -164,6 +193,11 @@ function toDto(row: PlatformAgreementSignature) {
     signerEmail: row.signerEmail,
     signedAt: row.signedAt,
     documentSha256: row.documentSha256,
+    // Which document this signature was taken against, so the Legal &
+    // Agreements page can say so — and warn when the slot's active document
+    // has since been replaced or reverted.
+    documentSource: row.documentSource,
+    documentFileName: row.documentFileName,
     guarantyExecuted: Boolean(row.guarantorName),
     guarantorName: row.guarantorName,
   };
@@ -187,11 +221,45 @@ async function latestSignature(slot: AgreementSlot): Promise<PlatformAgreementSi
 router.get("/admin/platform/agreements/signing-context", requireAdmin, async (_req, res) => {
   const slots: Record<string, unknown> = {};
   for (const slot of AGREEMENT_SLOTS) {
+    const active = await readActiveAgreementDocument(storage, slot);
+    const signed = await latestSignature(slot);
+
+    if (active.source !== "template") {
+      // An uploaded PDF is the whole agreement: its wording is fixed, so there
+      // are no fillable terms, no provider values to resolve and no bundled
+      // Exhibit C guaranty to offer. The signer reviews the PDF itself.
+      slots[slot] = {
+        title: AGREEMENT_TITLES[slot],
+        source: "uploaded",
+        template: null,
+        document:
+          active.source === "uploaded"
+            ? {
+                fileName: active.fileName,
+                fileSize: active.fileSize,
+                documentSha256: active.documentSha256,
+                uploadedAt: active.uploadedAt ? active.uploadedAt.toISOString() : null,
+              }
+            : null,
+        unavailableReason: active.source === "unavailable" ? active.message : null,
+        consentText: AGREEMENT_CONSENT_TEXTS[slot],
+        guarantyConsentText: null,
+        fields: [],
+        termsDigest: active.source === "uploaded" ? uploadedTermsDigest(slot, active) : "",
+        readyToSign: active.source === "uploaded",
+        missingProviderLabels: [],
+        signed: signed ? toDto(signed) : null,
+      };
+      continue;
+    }
+
     const providerValues = await buildProviderValues(slot);
     const missingProvider = missingProviderDefs(slot, providerValues);
-    const signed = await latestSignature(slot);
     slots[slot] = {
       title: AGREEMENT_TITLES[slot],
+      source: "template",
+      document: null,
+      unavailableReason: null,
       template: LEGAL_TEMPLATES[slot],
       consentText: AGREEMENT_CONSENT_TEXTS[slot],
       guarantyConsentText: slot === "msa" ? GUARANTY_CONSENT_TEXT : null,
@@ -266,6 +334,62 @@ router.post("/admin/platform/agreements/:slot/sign", requireAdmin, async (req, r
     return;
   }
 
+  // The uploaded PDF, when there is one, is the document being signed.
+  const active = await readActiveAgreementDocument(storage, slot);
+  if (active.source === "unavailable") {
+    res.status(409).json({ message: active.message, code: "document_unavailable" });
+    return;
+  }
+  if (active.source === "uploaded") {
+    if (body.guarantor) {
+      res.status(400).json({
+        message:
+          "The Exhibit C personal guaranty belongs to the bundled template. This agreement has an uploaded document, which governs on its own terms.",
+      });
+      return;
+    }
+    if (body.termsDigest !== uploadedTermsDigest(slot, active)) {
+      res.status(409).json({
+        message:
+          "The document for this agreement changed since you opened it. Reload the page and review the current document before signing.",
+        code: "terms_changed",
+      });
+      return;
+    }
+
+    const [uploadedRow] = await db
+      .insert(platformAgreementSignaturesTable)
+      .values({
+        slot,
+        documentTitle: AGREEMENT_TITLES[slot],
+        documentSource: "uploaded",
+        documentMarkdown: null,
+        // Pin the exact stored object: replacing the slot's document later
+        // writes a NEW object, so this signature keeps resolving to the
+        // version that was actually displayed and signed.
+        documentFileKey: active.fileKey,
+        documentFileName: active.fileName,
+        documentSha256: active.documentSha256,
+        fieldsJson: "{}",
+        consentText: AGREEMENT_CONSENT_TEXTS[slot],
+        signerUserId: req.user?.userId ?? null,
+        signerName: body.signerName,
+        signerTitle: body.signerTitle,
+        signerEmail: req.user?.email ?? "",
+        signatureText: body.signature,
+        ipAddress: req.ip ?? null,
+        userAgent: req.get("user-agent")?.slice(0, 400) ?? null,
+      })
+      .returning();
+
+    req.log.info(
+      { slot, signatureId: uploadedRow.id, source: "uploaded" },
+      "platform agreement signed",
+    );
+    res.status(201).json({ signature: toDto(uploadedRow) });
+    return;
+  }
+
   // Terms come from platform configuration, never from the signer. A stale or
   // tampering client can still post field values; they are dropped here, and
   // logged so the attempt is visible.
@@ -329,6 +453,7 @@ router.post("/admin/platform/agreements/:slot/sign", requireAdmin, async (req, r
     .values({
       slot,
       documentTitle: AGREEMENT_TITLES[slot],
+      documentSource: "template",
       documentMarkdown: filled.markdown,
       documentSha256,
       fieldsJson: JSON.stringify(values),
@@ -352,7 +477,45 @@ router.post("/admin/platform/agreements/:slot/sign", requireAdmin, async (req, r
   res.status(201).json({ signature: toDto(row) });
 });
 
-/** Stream the signed PDF (filled snapshot + signature certificate). */
+/**
+ * Stream the slot's ACTIVE uploaded document for review.
+ *
+ * Same-origin and authenticated on purpose: the review page has to embed the
+ * PDF, and the production CSP allows the portal to fetch only its own origin —
+ * a signed object-storage URL would be blocked in the browser. The bytes are
+ * hash-verified here, so what the signer reads is what a signature will pin.
+ */
+router.get("/admin/platform/agreements/:slot/document", requireAdmin, async (req, res) => {
+  const slot = parseSlot(String(req.params.slot));
+  if (!slot) {
+    res.status(404).json({ message: "Unknown agreement" });
+    return;
+  }
+  const active = await readActiveAgreementDocument(storage, slot);
+  if (active.source === "unavailable") {
+    res.status(409).json({ message: active.message, code: "document_unavailable" });
+    return;
+  }
+  if (active.source === "template") {
+    res.status(404).json({ message: "This agreement uses the bundled template" });
+    return;
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${AGREEMENT_FILE_BASES[slot]}.pdf"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.end(active.buffer);
+});
+
+/**
+ * Stream the signed PDF: the exact document that was displayed, with the
+ * electronic-signature certificate appended.
+ *
+ * For a template signature that is the filled markdown snapshot. For an
+ * uploaded document it is the stored PDF ITSELF — re-fetched by the file key
+ * pinned on the signature row, so a document replaced or reverted since then
+ * doesn't change what a past signature resolves to — with the certificate
+ * appended as extra pages.
+ */
 router.get("/admin/platform/agreements/:slot/signed-pdf", requireAdmin, async (req, res) => {
   const slot = parseSlot(String(req.params.slot));
   if (!slot) {
@@ -365,40 +528,110 @@ router.get("/admin/platform/agreements/:slot/signed-pdf", requireAdmin, async (r
     return;
   }
 
+  const certificate: SignatureCertificate = {
+    documentTitle: row.documentTitle,
+    documentSha256: row.documentSha256,
+    consentText: row.consentText,
+    signerName: row.signerName,
+    signerTitle: row.signerTitle,
+    signerEmail: row.signerEmail,
+    signatureText: row.signatureText,
+    signedAtIso: row.signedAt.toISOString(),
+    ipAddress: row.ipAddress,
+    userAgent: null,
+    guaranty:
+      slot !== "msa" || row.documentSource === "uploaded"
+        ? undefined
+        : row.guarantorName
+          ? {
+              name: row.guarantorName,
+              title: row.guarantorTitle ?? "",
+              address: row.guarantorAddress ?? "",
+              signatureText: row.guarantorSignature ?? "",
+              consentText: row.guarantyConsentText ?? GUARANTY_CONSENT_TEXT,
+            }
+          : "not_executed",
+  };
+
+  const fileName = `${AGREEMENT_FILE_BASES[slot]}-signed.pdf`;
+
+  if (row.documentSource === "uploaded") {
+    if (!row.documentFileKey) {
+      res.status(500).json({ message: "This signature has no archived document on file" });
+      return;
+    }
+    let uploaded: Buffer;
+    try {
+      const dl = await storage.downloadObjectBuffer(row.documentFileKey, {
+        maxBytes: MAX_AGREEMENT_PDF_BYTES,
+      });
+      uploaded = dl.buffer;
+    } catch {
+      res.status(404).json({
+        message:
+          "The document this signature was taken against is no longer in storage, so the signed copy can't be assembled.",
+      });
+      return;
+    }
+    // The signature is bound to these exact bytes; refuse to hand out a
+    // "signed copy" of anything else.
+    const sha = createHash("sha256").update(uploaded).digest("hex");
+    if (sha !== row.documentSha256) {
+      req.log.error({ slot, signatureId: row.id }, "archived agreement document hash mismatch");
+      res.status(409).json({
+        message:
+          "The archived document no longer matches the signature's recorded hash, so the signed copy can't be produced.",
+      });
+      return;
+    }
+
+    const certBuffer = await pdfToBuffer(
+      renderLegalPdf({
+        title: row.documentTitle,
+        markdown: [
+          `# ${row.documentTitle}`,
+          "",
+          `The agreement signed is the document supplied by SOBBU LLC and reproduced on the preceding pages (${row.documentFileName ?? "uploaded document"}). This page records the electronic signature taken against it.`,
+        ].join("\n"),
+        signature: certificate,
+      }),
+    );
+
+    let merged: Uint8Array;
+    try {
+      const out = await PdfLibDocument.load(uploaded);
+      const cert = await PdfLibDocument.load(certBuffer);
+      const pages = await out.copyPages(cert, cert.getPageIndices());
+      for (const page of pages) out.addPage(page);
+      merged = await out.save();
+    } catch (err) {
+      req.log.error({ slot, err }, "could not append the signature certificate to the document");
+      res.status(409).json({
+        message:
+          "The uploaded document could not be combined with the signature certificate (it may be encrypted). Upload an unprotected PDF and re-sign.",
+      });
+      return;
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.end(Buffer.from(merged));
+    return;
+  }
+
+  if (!row.documentMarkdown) {
+    res.status(500).json({ message: "This signature has no archived document on file" });
+    return;
+  }
+
   const doc = renderLegalPdf({
     title: row.documentTitle,
     markdown: row.documentMarkdown,
-    signature: {
-      documentTitle: row.documentTitle,
-      documentSha256: row.documentSha256,
-      consentText: row.consentText,
-      signerName: row.signerName,
-      signerTitle: row.signerTitle,
-      signerEmail: row.signerEmail,
-      signatureText: row.signatureText,
-      signedAtIso: row.signedAt.toISOString(),
-      ipAddress: row.ipAddress,
-      userAgent: null,
-      guaranty:
-        slot !== "msa"
-          ? undefined
-          : row.guarantorName
-            ? {
-                name: row.guarantorName,
-                title: row.guarantorTitle ?? "",
-                address: row.guarantorAddress ?? "",
-                signatureText: row.guarantorSignature ?? "",
-                consentText: row.guarantyConsentText ?? GUARANTY_CONSENT_TEXT,
-              }
-            : "not_executed",
-    },
+    signature: certificate,
   });
 
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${AGREEMENT_FILE_BASES[slot]}-signed.pdf"`,
-  );
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   doc.pipe(res);
 });
 

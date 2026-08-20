@@ -58,9 +58,25 @@ type SignedDto = {
   guarantorName: string | null;
 };
 
+type UploadedDoc = {
+  fileName: string;
+  fileSize: number | null;
+  documentSha256: string;
+  uploadedAt: string | null;
+};
+
 type SlotContext = {
   title: string;
-  template: string;
+  /**
+   * Which document governs this slot. "uploaded" means the platform owner
+   * replaced the bundled template with a PDF — that PDF is what gets reviewed
+   * and signed, and there are no fillable terms.
+   */
+  source?: "template" | "uploaded";
+  template: string | null;
+  document?: UploadedDoc | null;
+  /** Set when an uploaded document exists but can't be read; signing is blocked. */
+  unavailableReason?: string | null;
   consentText: string;
   guarantyConsentText: string | null;
   fields: ContextField[];
@@ -117,6 +133,10 @@ export default function AgreementSignPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [signedNow, setSignedNow] = useState<SignedDto | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [docUrl, setDocUrl] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
+  /** No signing an uploaded document the signer was never actually shown. */
+  const [docLoaded, setDocLoaded] = useState(false);
 
   useEffect(() => {
     if (!slot) return;
@@ -131,6 +151,43 @@ export default function AgreementSignPage() {
       })
       .catch((e) => setLoadError((e as Error).message));
   }, [slot]);
+
+  const isUploaded = ctx?.source === "uploaded";
+
+  // The uploaded PDF is the document being agreed to, so it has to be on
+  // screen — not just linked. It's fetched with the admin's token and shown as
+  // a blob so the same bytes the server will archive are what the signer reads.
+  useEffect(() => {
+    if (!slot || !isUploaded || !ctx?.document) return;
+    setDocLoaded(false);
+    let revoked = false;
+    let objectUrl: string | null = null;
+    setDocError(null);
+    (async () => {
+      // Same-origin on purpose: the production CSP only lets the portal fetch
+      // its own API, and this endpoint hash-verifies the bytes it serves.
+      const res = await fetchWithAuth(`/api/admin/platform/agreements/${slot}/document`);
+      if (!res.ok) {
+        let msg = `Could not load the document (${res.status})`;
+        try {
+          const data = (await res.json()) as { message?: string };
+          if (data.message) msg = data.message;
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      if (revoked) return;
+      objectUrl = URL.createObjectURL(blob);
+      setDocUrl(objectUrl);
+    })().catch((e) => setDocError((e as Error).message));
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setDocUrl(null);
+    };
+  }, [slot, isUploaded, ctx?.document?.documentSha256]);
 
   // SOBBU's values are display-only. The server re-derives them when the
   // signature is submitted, so nothing on this page can alter the terms.
@@ -149,8 +206,11 @@ export default function AgreementSignPage() {
   // Preview the SERVER's template, not this bundle's copy, so a stale browser
   // build can never show one document and sign another.
   const filled = useMemo(
-    () => (slot ? fillAgreement(slot, previewValues, { template: ctx?.template }) : null),
-    [slot, previewValues, ctx?.template],
+    () =>
+      slot && ctx && !isUploaded
+        ? fillAgreement(slot, previewValues, { template: ctx.template ?? undefined })
+        : null,
+    [slot, ctx, isUploaded, previewValues],
   );
 
   const previewHtml = useMemo(
@@ -173,7 +233,7 @@ export default function AgreementSignPage() {
   }
 
   const groups: AgreementFieldGroup[] = [];
-  if (ctx) {
+  if (ctx && !isUploaded) {
     for (const f of ctx.fields) {
       if (f.group === "guaranty") continue;
       if (!groups.includes(f.group)) groups.push(f.group);
@@ -210,7 +270,9 @@ export default function AgreementSignPage() {
     signerTitle.trim().length > 0 &&
     signatureText.trim().length > 0 &&
     consent &&
-    guarantyComplete;
+    guarantyComplete &&
+    // An uploaded document can only be accepted once it is actually on screen.
+    (!isUploaded || (docLoaded && !docError));
 
   async function submit() {
     if (!slot || !ctx) return;
@@ -359,9 +421,9 @@ export default function AgreementSignPage() {
           Review &amp; sign — {ctx?.title ?? "…"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          The commercial and legal terms are set by SOBBU and shown here for review — they
-          can&apos;t be changed on this page. Complete the signature block to accept. The exact
-          document you sign is stored permanently.
+          {isUploaded
+            ? "SOBBU supplied this agreement as a finished document. Read it in full, then complete the signature block to accept. The exact file you sign is stored permanently."
+            : "The commercial and legal terms are set by SOBBU and shown here for review — they can't be changed on this page. Complete the signature block to accept. The exact document you sign is stored permanently."}
         </p>
       </header>
 
@@ -387,9 +449,15 @@ export default function AgreementSignPage() {
           role="alert"
           className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
         >
-          This agreement isn&apos;t ready to sign yet — SOBBU still has to set:{" "}
-          {ctx.missingProviderLabels.join(", ")}. These can only be set by SOBBU, so please
-          contact them to finish the agreement.
+          {ctx.unavailableReason ? (
+            ctx.unavailableReason
+          ) : (
+            <>
+              This agreement isn&apos;t ready to sign yet — SOBBU still has to set:{" "}
+              {ctx.missingProviderLabels.join(", ")}. These can only be set by SOBBU, so please
+              contact them to finish the agreement.
+            </>
+          )}
         </div>
       )}
 
@@ -418,7 +486,7 @@ export default function AgreementSignPage() {
               </Card>
             ))}
 
-            {slot === "msa" && (
+            {slot === "msa" && !isUploaded && (
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between gap-3">
@@ -560,20 +628,64 @@ export default function AgreementSignPage() {
 
           <Card className="min-w-0">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Live preview</CardTitle>
+              <CardTitle className="text-sm">
+                {isUploaded ? "The document you are signing" : "Live preview"}
+              </CardTitle>
               <CardDescription>
-                This is the exact document that will be recorded when you sign. Unfilled fields
-                appear as [BRACKETED] placeholders.
+                {isUploaded ? (
+                  <>
+                    This agreement is governed by the document SOBBU uploaded — shown in full
+                    below. It is the exact file that will be archived with your signature.
+                  </>
+                ) : (
+                  <>
+                    This is the exact document that will be recorded when you sign. Unfilled fields
+                    appear as [BRACKETED] placeholders.
+                  </>
+                )}
               </CardDescription>
+              {isUploaded && ctx.document && (
+                <p className="break-all pt-1 text-xs text-muted-foreground">
+                  {ctx.document.fileName}
+                  {ctx.document.uploadedAt && (
+                    <> · uploaded {new Date(ctx.document.uploadedAt).toLocaleDateString()}</>
+                  )}
+                  <br />
+                  SHA-256: <span className="font-mono">{ctx.document.documentSha256}</span>
+                </p>
+              )}
             </CardHeader>
             <CardContent>
-              <div
-                className="prose prose-sm max-w-none overflow-x-auto rounded-md border border-border bg-white p-4 sm:p-6 prose-headings:scroll-mt-4 prose-table:text-xs lg:max-h-[75dvh] lg:overflow-y-auto"
-                // Rendered from the bundled agreement template via markdown-it
-                // with html:false — user-entered values are markdown-escaped by
-                // fillAgreement and cannot inject markup.
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-              />
+              {isUploaded ? (
+                docError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {docError}
+                  </p>
+                ) : docUrl ? (
+                  <iframe
+                    src={docUrl}
+                    title={`${ctx.title} — document being signed`}
+                    className="h-[75dvh] w-full rounded-md border border-border bg-white"
+                    onLoad={() => setDocLoaded(true)}
+                    onError={() =>
+                      setDocError("The document could not be displayed, so it can't be signed here.")
+                    }
+                  />
+                ) : (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading the document…
+                  </p>
+                )
+              ) : (
+                <div
+                  className="prose prose-sm max-w-none overflow-x-auto rounded-md border border-border bg-white p-4 sm:p-6 prose-headings:scroll-mt-4 prose-table:text-xs lg:max-h-[75dvh] lg:overflow-y-auto"
+                  // Rendered from the bundled agreement template via markdown-it
+                  // with html:false — user-entered values are markdown-escaped by
+                  // fillAgreement and cannot inject markup.
+                  dangerouslySetInnerHTML={{ __html: previewHtml }}
+                />
+              )}
             </CardContent>
           </Card>
         </div>

@@ -120,18 +120,34 @@ export type PlatformAgreementDoc = typeof platformAgreementDocsTable.$inferSelec
  * the latest row per slot is the current signed version — earlier rows are
  * retained as an audit trail and are never updated or deleted.
  *
- * `documentMarkdown` is the FULL filled agreement text exactly as presented
- * at signing (immutable snapshot — later template edits cannot alter what
- * was signed), `documentSha256` is its hash, `fieldsJson` the fill values,
- * and `consentText` the verbatim consent language shown to the signer.
- * Guarantor columns are populated only when the optional MSA Exhibit C
- * personal guaranty was executed.
+ * A signature is taken against ONE of two document sources, recorded in
+ * `documentSource`:
+ *  - `"template"` — the bundled markdown agreement. `documentMarkdown` is the
+ *    FULL filled text exactly as presented at signing (immutable snapshot —
+ *    later template edits cannot alter what was signed) and `documentSha256`
+ *    is its hash.
+ *  - `"uploaded"` — the PDF a super-admin uploaded for the slot. There is no
+ *    markdown; `documentFileKey` pins the exact stored object that was
+ *    displayed and signed (replacing the slot's document later writes a NEW
+ *    object, so past signatures still resolve to the version they were taken
+ *    against) and `documentSha256` is the SHA-256 of those PDF bytes.
+ *
+ * `fieldsJson` holds the fill values (empty for uploaded documents) and
+ * `consentText` the verbatim consent language shown to the signer. Guarantor
+ * columns are populated only when the optional MSA Exhibit C personal
+ * guaranty was executed (bundled template only).
  */
 export const platformAgreementSignaturesTable = pgTable("platform_agreement_signatures", {
   id: uuid("id").primaryKey().defaultRandom(),
   slot: text("slot").notNull(), // "msa" | "user_agreement"
   documentTitle: text("document_title").notNull(),
-  documentMarkdown: text("document_markdown").notNull(),
+  // "template" | "uploaded" — which source the signer actually reviewed.
+  documentSource: text("document_source").notNull().default("template"),
+  // Null for uploaded documents (the signed artifact is the PDF, not markdown).
+  documentMarkdown: text("document_markdown"),
+  // Uploaded documents only: the exact stored object + its file name at signing.
+  documentFileKey: text("document_file_key"),
+  documentFileName: text("document_file_name"),
   documentSha256: text("document_sha256").notNull(),
   fieldsJson: text("fields_json").notNull(),
   consentText: text("consent_text").notNull(),

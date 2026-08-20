@@ -1,27 +1,21 @@
 ---
 name: api-server tests must not run files in parallel
-description: vitest fileParallelism must stay false for api-server — shared single DB makes concurrent file execution race (23505 flakes).
+description: The api-server suite shares one real database, so file-level parallelism must stay off; unexplained unique-violation flakes are write pollution, not regressions.
 ---
 
-api-server test files share ONE real Postgres instance. vitest's
-`fileParallelism` defaults to `true` even with `singleFork: true`, which
-let files run concurrently and race DB writes (e.g. a manual draft-invoice
-insert vs the auto invoice-sync upsert on the same `(siteId, ISO-week)`
-bucket → `23505 duplicate key`).
+api-server test files share ONE real Postgres instance, and the test runner
+would otherwise run files concurrently. File parallelism is therefore disabled
+for that package — do not re-enable it to speed things up.
 
-**Why:** there is no per-file DB isolation; any suite mutating shared
-state (invoice buckets, singleton config rows, global counters) can
-collide with another file's writes.
+**Why:** there is no per-file database isolation. Any suite mutating shared
+state (invoice buckets, singleton config rows, global counters) can collide
+with another file's writes and surface as a duplicate-key failure in code that
+is perfectly correct.
 
-**How to apply:** `fileParallelism: false` is set in
-`artifacts/api-server/vitest.config.ts` — do NOT revert it to speed up CI.
-If a 23505-style flake appears under the full gate but passes alone,
-suspect concurrent-write pollution, not the code under test.
-
-Serializing files only isolates a suite from ITSELF. The same dev DB is also
-shared with other runs happening at the same time (parallel task validations
-and merges), which no test-runner setting can serialize. Read the failure's
-shape: the same file every time = real; a different unrelated file each
-attempt, each passing in isolation, or a count assertion inflated by rows
-nobody in this suite created = foreign-run pollution — re-run rather than
-editing the named test.
+**How to apply:** serializing files only isolates the suite from ITSELF. The
+same dev database is also shared with other runs happening at the same time
+(parallel task validations and merges), which no runner setting can serialize.
+Read the failure's shape: the same file failing every time = real; a different
+unrelated file each attempt, each passing in isolation, or a count assertion
+inflated by rows nobody in this suite created = foreign-run pollution — re-run
+rather than editing the named test.

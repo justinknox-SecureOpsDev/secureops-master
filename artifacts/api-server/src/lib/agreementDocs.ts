@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { eq, sql } from "drizzle-orm";
-import { db, platformAgreementDocsTable } from "@workspace/db";
+import { db, platformAgreementDocsTable, platformAgreementSignaturesTable } from "@workspace/db";
 import { AGREEMENT_SLOTS, type AgreementSlot } from "@workspace/legal-docs";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 
@@ -82,6 +82,25 @@ export async function registerAgreementDoc(
   input: { slot: AgreementSlot; fileKey: string; fileName: string; editor: string },
 ): Promise<RegisterAgreementResult> {
   const normalized = storage.normalizeObjectEntityPath(input.fileKey);
+
+  // A stored object that a signature points at is evidence: signatures pin the
+  // file key and its hash, so re-registering (and therefore overwriting) that
+  // same path would make an archived signed copy fail verification. Every
+  // upload must land on its own fresh path.
+  const [pinned] = await db
+    .select({ id: platformAgreementSignaturesTable.id })
+    .from(platformAgreementSignaturesTable)
+    .where(eq(platformAgreementSignaturesTable.documentFileKey, normalized))
+    .limit(1);
+  if (pinned) {
+    return {
+      ok: false,
+      status: 409,
+      message:
+        "That upload location already holds a document a signature was taken against. Upload the file again to get a new location.",
+    };
+  }
+
   let size: number;
   let buffer: Buffer;
   try {
@@ -131,4 +150,83 @@ export async function registerAgreementDoc(
     .where(eq(platformAgreementDocsTable.slot, input.slot))
     .limit(1);
   return { ok: true, dto: agreementRowToDto(input.slot, row) };
+}
+
+/**
+ * The document a slot is currently governed by. An uploaded PDF REPLACES the
+ * bundled template everywhere — review, signing and the archived signed copy —
+ * so this is the single resolver every one of those surfaces must consult.
+ *
+ * The stored bytes are re-read and re-hashed on every call, not trusted from
+ * the metadata row: a signature has to be bound to a document that actually
+ * exists and still hashes to what was registered. A slot whose uploaded
+ * document can't be read, or no longer matches its recorded hash, is reported
+ * as `unavailable` — never as the template. Quietly showing (and signing) the
+ * bundled wording when the platform owner has replaced it is exactly the
+ * mismatch this resolver exists to prevent.
+ */
+export type ActiveAgreementDocument =
+  | { source: "template" }
+  | {
+      source: "uploaded";
+      fileKey: string;
+      fileName: string;
+      fileSize: number | null;
+      documentSha256: string;
+      uploadedAt: Date | null;
+      /** The verified bytes, so callers don't download the same object twice. */
+      buffer: Buffer;
+    }
+  | { source: "unavailable"; message: string };
+
+export async function readActiveAgreementDocument(
+  storage: ObjectStorageService,
+  slot: AgreementSlot,
+): Promise<ActiveAgreementDocument> {
+  const [row] = await db
+    .select()
+    .from(platformAgreementDocsTable)
+    .where(eq(platformAgreementDocsTable.slot, slot))
+    .limit(1);
+  if (!row) return { source: "template" };
+
+  let buffer: Buffer;
+  try {
+    const dl = await storage.downloadObjectBuffer(row.fileKey, {
+      maxBytes: MAX_AGREEMENT_PDF_BYTES,
+    });
+    buffer = dl.buffer;
+  } catch {
+    return {
+      source: "unavailable",
+      message:
+        "The uploaded document for this agreement could not be read from storage. Re-upload it before signing.",
+    };
+  }
+
+  const actualSha256 = createHash("sha256").update(buffer).digest("hex");
+  if (!row.documentSha256) {
+    // Rows written before the hash column existed: adopt the stored bytes'
+    // hash now, so this document can be pinned to a signature.
+    await db
+      .update(platformAgreementDocsTable)
+      .set({ documentSha256: actualSha256 })
+      .where(eq(platformAgreementDocsTable.slot, slot));
+  } else if (row.documentSha256 !== actualSha256) {
+    return {
+      source: "unavailable",
+      message:
+        "The stored document for this agreement no longer matches the copy that was uploaded, so it can't be reviewed or signed. Upload it again.",
+    };
+  }
+
+  return {
+    source: "uploaded",
+    fileKey: row.fileKey,
+    fileName: row.fileName,
+    fileSize: row.fileSize,
+    documentSha256: actualSha256,
+    uploadedAt: row.uploadedAt ?? null,
+    buffer,
+  };
 }

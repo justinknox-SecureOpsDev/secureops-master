@@ -45,6 +45,7 @@ type SlotStatus = {
   custom: {
     fileName: string;
     fileSize: number | null;
+    documentSha256: string | null;
     uploadedAt: string | null;
     uploadedBy: string | null;
   } | null;
@@ -58,9 +59,29 @@ type SignatureDto = {
   signerEmail: string;
   signedAt: string;
   documentSha256: string;
+  /** Which document was actually signed: the bundled template or an uploaded PDF. */
+  documentSource?: "template" | "uploaded";
+  documentFileName?: string | null;
   guarantyExecuted: boolean;
   guarantorName: string | null;
 };
+
+/**
+ * Whether the signature on file still covers the document the slot serves
+ * today. Uploading, replacing or reverting a document after signing leaves the
+ * old signature valid for the version it was taken against — but the current
+ * wording is then unsigned, which the card has to say out loud.
+ */
+function signatureCoversActiveDocument(
+  signed: SignatureDto,
+  custom: SlotStatus["custom"],
+): boolean {
+  const signedSource = signed.documentSource ?? "template";
+  if (!custom) return signedSource === "template";
+  if (signedSource !== "uploaded") return false;
+  // An older row with no hash on the document can't be compared; don't cry wolf.
+  return custom.documentSha256 == null || custom.documentSha256 === signed.documentSha256;
+}
 
 // Platform-level legal documents authored by SOBBU LLC (the company that owns,
 // develops, and operates SecureOps Command). These are distinct from the
@@ -203,6 +224,17 @@ export default function LegalAgreementsPage() {
 
   async function uploadCustom(slot: AgreementSlot, file: File) {
     clearMessage(slot);
+    // Replacing a signed document is allowed, but never silently: the existing
+    // signature keeps pointing at the version it was taken against, and the new
+    // document is unsigned until someone signs it.
+    const signedAlready = signatures?.[slot] ?? null;
+    if (
+      signedAlready &&
+      !window.confirm(
+        `This agreement was already signed by ${signedAlready.signerName}. That signature stays valid for the document it was taken against, and its signed PDF still reproduces that exact version — but the new document will be unsigned until someone signs it. Continue?`,
+      )
+    )
+      return;
     if (!/\.pdf$/i.test(file.name)) {
       setMessage(slot, "error", "Please choose a PDF file.");
       return;
@@ -269,9 +301,13 @@ export default function LegalAgreementsPage() {
   }
 
   async function revertToTemplate(slot: AgreementSlot, title: string) {
+    const signedAlready = signatures?.[slot] ?? null;
     if (
       !window.confirm(
-        `Remove the uploaded document for "${title}" and revert to the bundled template?`,
+        `Remove the uploaded document for "${title}" and revert to the bundled template?` +
+          (signedAlready
+            ? ` The existing signature stays valid for the uploaded document it was taken against, and its signed PDF still reproduces that file — but the bundled template will be unsigned until someone signs it.`
+            : ""),
       )
     )
       return;
@@ -380,11 +416,30 @@ export default function LegalAgreementsPage() {
                   </p>
                 )}
                 {signed && (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Signed by {signed.signerName} ({signed.signerTitle}) on{" "}
-                    {new Date(signed.signedAt).toLocaleDateString()}
-                    {signed.guarantyExecuted && <> · personal guaranty executed</>}
-                  </p>
+                  <>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Signed by {signed.signerName} ({signed.signerTitle}) on{" "}
+                      {new Date(signed.signedAt).toLocaleDateString()}
+                      {(signed.documentSource ?? "template") === "uploaded" ? (
+                        <>
+                          {" "}
+                          · signed the uploaded document
+                          {signed.documentFileName ? ` (${signed.documentFileName})` : ""}
+                        </>
+                      ) : (
+                        <> · signed the bundled template</>
+                      )}
+                      {signed.guarantyExecuted && <> · personal guaranty executed</>}
+                    </p>
+                    {statuses !== null && !signatureCoversActiveDocument(signed, custom) && (
+                      <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+                        The document served here has changed since it was signed. The signature
+                        above still covers the version it was taken against — the signed PDF
+                        reproduces that exact document — but nobody has signed the current one
+                        yet. Use “Review &amp; re-sign” to sign it.
+                      </p>
+                    )}
+                  </>
                 )}
                 {message && (
                   <p
