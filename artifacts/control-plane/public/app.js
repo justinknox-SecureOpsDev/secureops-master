@@ -1112,6 +1112,7 @@ function renderPlanBilling(config) {
   html += "<label>Active officers<input id='pb-officerCount' type='number' min='1' step='1' placeholder='e.g. 47' value='" + esc(c.officerCount != null ? String(c.officerCount) : "") + "'></label>";
   html += "<label>Plan start date<input id='pb-planStartDate' type='date' value='" + esc(startDate) + "'></label>";
   html += "<label>Officer time-edit window (hrs)<input id='pb-timeWindow' type='number' min='0' step='0.25' placeholder='2 (default)' value='" + esc(c.timeConfirmEditWindowHours || "") + "'></label>";
+  html += "<label>Auto clock-out delay (min)<input id='pb-autoClockOut' type='number' min='0' max='720' step='1' placeholder='10 (default)' value='" + esc(c.autoClockOutDelayMinutes != null ? String(c.autoClockOutDelayMinutes) : "") + "'></label>";
   html += "</div>";
   html += "<div class='pb-fee'>";
   html += "<label class='check'><input id='pb-feeEnabled' type='checkbox' " + (c.processingFeeEnabled ? "checked" : "") + "> Invoice processing fee</label>";
@@ -1183,6 +1184,8 @@ async function savePlanBilling() {
     processingFeeEnabled: $("pb-feeEnabled").checked,
     processingFeeRate: rateStr === "" ? null : rateStr,
     timeConfirmEditWindowHours: $("pb-timeWindow").value.trim(),
+    // Blank clears the company-wide override, restoring the 10-minute fallback.
+    autoClockOutDelayMinutes: numOrNull($("pb-autoClockOut").value, true),
   };
   try {
     const r = await api("/customers/" + settingsCustomer.id + "/remote-settings/plan-billing", {

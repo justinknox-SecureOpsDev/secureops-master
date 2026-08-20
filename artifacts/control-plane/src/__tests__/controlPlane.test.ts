@@ -134,6 +134,18 @@ describe("remote-change summaries", () => {
     );
   });
 
+  it("summarizes the company auto clock-out delay, including clearing it", () => {
+    expect(summarizePlanBilling({ autoClockOutDelayMinutes: 45 })).toBe(
+      "Updated plan & billing: auto clock-out 45m",
+    );
+    expect(summarizePlanBilling({ autoClockOutDelayMinutes: 0 })).toBe(
+      "Updated plan & billing: auto clock-out 0m",
+    );
+    expect(summarizePlanBilling({ autoClockOutDelayMinutes: null })).toBe(
+      "Updated plan & billing: auto clock-out default",
+    );
+  });
+
   it("shows fee off and explicit unset values for a plan/billing body", () => {
     expect(
       summarizePlanBilling({ planTier: null, monthlyPriceCents: null, processingFeeEnabled: false }),
