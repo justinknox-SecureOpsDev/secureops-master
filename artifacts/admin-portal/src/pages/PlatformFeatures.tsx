@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { refreshBrand } from "@/lib/brand";
+import { errorText, writeWasRefused, type SettingsMessage } from "@/lib/settingsStatus";
+import { ControlMessage, LoadFailedNotice, LoadingNotice } from "@/components/SettingsStatus";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -238,15 +240,47 @@ export default function PlatformFeaturesPage() {
     }
   }, [configQ.data]);
 
+  // Save results live next to the button that produced them: on a phone these
+  // cards stack, so a page-top banner (or a toast that has already faded) is
+  // no signal at all. See @/lib/settingsStatus.
+  const [configMsg, setConfigMsg] = useState<SettingsMessage | null>(null);
+
   const saveConfig = useMutation({
     mutationFn: (data: CustomerConfig) =>
-      api("/admin/platform/customer-config", { method: "PUT", body: data }),
-    onSuccess: () => {
-      toast({ title: "Saved", description: "Customer account details updated." });
-      qc.invalidateQueries({ queryKey: ["platform", "customer-config"] });
+      api<{ config: CustomerConfig | null }>("/admin/platform/customer-config", {
+        method: "PUT",
+        body: data,
+      }),
+    onSuccess: async (reply) => {
+      // The server's reply is authoritative. Apply it *before* the confirming
+      // refresh — and fence any read that was already in flight — so a failing
+      // refresh can never redraw a stored save as "nothing configured".
+      await qc.cancelQueries({ queryKey: ["platform", "customer-config"] });
+      qc.setQueryData(["platform", "customer-config"], reply);
+      const r = await configQ.refetch();
+      setConfigMsg(
+        r.isError
+          ? {
+              kind: "warn",
+              text: "Saved — the details are stored, but this page couldn't re-read them. The values above are what the server returned.",
+            }
+          : { kind: "ok", text: "Customer account details saved." },
+      );
     },
-    onError: (err: unknown) => {
-      toast({ title: "Failed to save", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    onError: async (err: unknown) => {
+      if (writeWasRefused(err)) {
+        setConfigMsg({ kind: "error", text: `Not saved — ${errorText(err)}` });
+        return;
+      }
+      // 5xx / no answer at all: the write may or may not have landed. Claim
+      // neither — re-read and show what is actually stored.
+      const r = await configQ.refetch();
+      setConfigMsg({
+        kind: "error",
+        text: r.isError
+          ? `Couldn't confirm the save (${errorText(err)}) and this page couldn't re-read the details. Reload the page to see what is stored.`
+          : `Couldn't confirm the save (${errorText(err)}). The fields above now show what is stored — if they didn't change, try again.`,
+      });
     },
   });
 
@@ -304,16 +338,38 @@ export default function PlatformFeaturesPage() {
     }
   }, [brandQ.data]);
 
+  const [brandMsg, setBrandMsg] = useState<SettingsMessage | null>(null);
+
   const saveBrand = useMutation({
     mutationFn: (data: BrandCfg) =>
-      api("/admin/platform/brand", { method: "PUT", body: data }),
-    onSuccess: async () => {
-      await refreshBrand();
-      toast({ title: "Branding saved", description: "New branding is live across the portal." });
-      qc.invalidateQueries({ queryKey: ["platform", "brand"] });
+      api<{ config: BrandCfg | null }>("/admin/platform/brand", { method: "PUT", body: data }),
+    onSuccess: async (reply) => {
+      // Authoritative write reply first, then the confirming re-read.
+      await qc.cancelQueries({ queryKey: ["platform", "brand"] });
+      qc.setQueryData(["platform", "brand"], reply);
+      await refreshBrand().catch(() => undefined);
+      const r = await brandQ.refetch();
+      setBrandMsg(
+        r.isError
+          ? {
+              kind: "warn",
+              text: "Saved — the branding is stored, but this page couldn't re-read it. The values above are what the server returned.",
+            }
+          : { kind: "ok", text: "Branding saved — live across the portal." },
+      );
     },
-    onError: (err: unknown) => {
-      toast({ title: "Failed to save", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    onError: async (err: unknown) => {
+      if (writeWasRefused(err)) {
+        setBrandMsg({ kind: "error", text: `Not saved — ${errorText(err)}` });
+        return;
+      }
+      const r = await brandQ.refetch();
+      setBrandMsg({
+        kind: "error",
+        text: r.isError
+          ? `Couldn't confirm the save (${errorText(err)}) and this page couldn't re-read the branding. Reload the page to see what is stored.`
+          : `Couldn't confirm the save (${errorText(err)}). The fields above now show what is stored — if they didn't change, try again.`,
+      });
     },
   });
 
@@ -353,25 +409,67 @@ export default function PlatformFeaturesPage() {
     }
   }, [flagsQ.data]);
 
+  const [featuresMsg, setFeaturesMsg] = useState<SettingsMessage | null>(null);
+
   const save = useMutation({
     mutationFn: (updates: Array<{ key: string; enabled: boolean | null }>) =>
-      api("/admin/platform/features", { method: "PUT", body: { updates } }),
-    onSuccess: async () => {
-      await refreshBrand();
-      toast({ title: "Saved", description: "Feature flags updated. Navigation will refresh on next page load." });
-      qc.invalidateQueries({ queryKey: ["platform", "features"] });
+      api<{ features: FeatureDetail[] }>("/admin/platform/features", {
+        method: "PUT",
+        body: { updates },
+      }),
+    onSuccess: async (reply) => {
+      await qc.cancelQueries({ queryKey: ["platform", "features"] });
+      qc.setQueryData(["platform", "features"], reply);
+      await refreshBrand().catch(() => undefined);
+      const r = await flagsQ.refetch();
+      setFeaturesMsg(
+        r.isError
+          ? {
+              kind: "warn",
+              text: "Saved — the flags are stored, but this page couldn't re-read them. The toggles above are what the server returned.",
+            }
+          : {
+              kind: "ok",
+              text: "Feature flags saved. Navigation will refresh on next page load.",
+            },
+      );
     },
-    onError: (err: unknown) => {
-      toast({
-        title: "Failed to save",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
+    onError: async (err: unknown) => {
+      if (writeWasRefused(err)) {
+        setFeaturesMsg({ kind: "error", text: `Not saved — ${errorText(err)}` });
+        return;
+      }
+      const r = await flagsQ.refetch();
+      setFeaturesMsg({
+        kind: "error",
+        text: r.isError
+          ? `Couldn't confirm the save (${errorText(err)}) and this page couldn't re-read the flags. Reload the page to see what is stored.`
+          : `Couldn't confirm the save (${errorText(err)}). The toggles above now show what is stored — if they didn't change, try again.`,
       });
     },
   });
 
   if (meQ.isLoading) {
     return <div className="p-6"><Loader2 className="w-5 h-5 animate-spin" /></div>;
+  }
+  if (meQ.isError && !meQ.data) {
+    // Don't fall through to the editor: with the access answer unknown every
+    // settings query below stays disabled, and the forms would render their
+    // built-in defaults as if nothing were configured.
+    return (
+      <div className="p-6 max-w-2xl">
+        <Card>
+          <CardContent className="p-6">
+            <LoadFailedNotice
+              label="platform"
+              hasLastKnown={false}
+              onRetry={() => void meQ.refetch()}
+              retrying={meQ.isFetching}
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
   if (meQ.data && !meQ.data.isSuperAdmin) {
     return (
@@ -435,6 +533,18 @@ export default function PlatformFeaturesPage() {
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          {brandQ.isError && (
+            <LoadFailedNotice
+              label="branding"
+              hasLastKnown={!!brandQ.data}
+              onRetry={() => void brandQ.refetch()}
+              retrying={brandQ.isFetching}
+            />
+          )}
+          {!brandQ.data ? (
+            brandQ.isError ? null : <LoadingNotice label="branding" />
+          ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Company name</p>
@@ -604,6 +714,9 @@ export default function PlatformFeaturesPage() {
             </Button>
             {brandDirty && <span className="text-xs opacity-70">Unsaved changes</span>}
           </div>
+          <ControlMessage message={brandMsg} />
+          </>
+          )}
         </CardContent>
       </Card>
 
@@ -615,6 +728,18 @@ export default function PlatformFeaturesPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {configQ.isError && (
+            <LoadFailedNotice
+              label="customer account"
+              hasLastKnown={!!configQ.data}
+              onRetry={() => void configQ.refetch()}
+              retrying={configQ.isFetching}
+            />
+          )}
+          {!configQ.data ? (
+            configQ.isError ? null : <LoadingNotice label="customer account" />
+          ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/*
               Company name, plan tier and monthly price are printed into the
@@ -750,6 +875,9 @@ export default function PlatformFeaturesPage() {
             </Button>
             {configDirty && <span className="text-xs opacity-70">Unsaved changes</span>}
           </div>
+          <ControlMessage message={configMsg} />
+          </>
+          )}
         </CardContent>
       </Card>
 
@@ -870,6 +998,17 @@ export default function PlatformFeaturesPage() {
           <CardTitle className="text-base">Features</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1">
+          {flagsQ.isError && (
+            <div className="pb-2">
+              <LoadFailedNotice
+                label="feature flag"
+                hasLastKnown={!!flagsQ.data}
+                onRetry={() => void flagsQ.refetch()}
+                retrying={flagsQ.isFetching}
+              />
+            </div>
+          )}
+          {!flagsQ.data && !flagsQ.isError && <LoadingNotice label="feature flag" />}
           {features.map((f) => {
             const on = effective(f.key);
             const d = draft[f.key];
@@ -948,7 +1087,7 @@ export default function PlatformFeaturesPage() {
         </Card>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           onClick={() => {
             const updates = features
@@ -969,6 +1108,9 @@ export default function PlatformFeaturesPage() {
         {dirty && (
           <span className="text-xs opacity-70">Unsaved changes</span>
         )}
+        <div className="w-full">
+          <ControlMessage message={featuresMsg} />
+        </div>
       </div>
     </div>
   );

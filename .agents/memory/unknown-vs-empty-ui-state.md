@@ -22,7 +22,10 @@ the wrong layer for hours.
 3. Errors belong on the row/card that failed, not only in a page-top banner.
    On a phone the cards stack and the banner is scrolled far off-screen, so a
    top-only error reads as "nothing happened at all".
-4. Fence in-flight reads behind a write generation counter. A GET issued before
+4. Never invent the option set either. A hard-coded fallback list (roles,
+   tiers, colours) rendered after a failed read looks exactly like a stored
+   configuration; show the failure instead.
+5. Fence in-flight reads behind a write generation counter. A GET issued before
    the write can resolve after it and re-commit pre-write data. Capture the
    generation when the read starts and discard the response if it changed.
 
