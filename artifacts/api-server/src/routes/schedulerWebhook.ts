@@ -18,6 +18,7 @@ import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignm
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { logger } from "../lib/logger";
+import { isOpenTimeEntryConflict } from "../lib/timeEntryConflict";
 import rateLimit, { MemoryStore } from "express-rate-limit";
 
 const router: IRouter = Router();
@@ -700,33 +701,46 @@ export async function processInboundClockEvent(payload: SchedulerClockEventPaylo
   // ON CONFLICT DO UPDATE handles concurrent webhook/reconcile races on the same
   // externalId — the unique constraint on (externalSource, externalId) ensures
   // only one row is created even if two callers race past the lookups above.
-  const [created] = await db.insert(timeEntriesTable).values({
-    employeeId,
-    shiftId: shiftId ?? null,
-    siteId: siteId ?? null,
-    clockInTime: clockIn,
-    clockOutTime: clockOut ?? null,
-    hoursWorked: hours ?? null,
-    approvalStatus: "pending",
-    isVerified: false,
-    externalId: payload.id,
-    externalSource: SCHEDULER_SOURCE,
-    externalUpdatedAt: incomingUpdatedAt,
-    syncSource: SCHEDULER_SOURCE,
-  })
-  .onConflictDoUpdate({
-    target: [timeEntriesTable.externalSource, timeEntriesTable.externalId],
-    set: {
+  //
+  // A scheduler event with no clock-out is an OPEN entry, and `time_entries`
+  // carries a partial unique index allowing only one open entry per officer.
+  // If the officer is already clocked in locally (and this event didn't match
+  // the dedup window above), the insert raises 23505 — that's a data conflict
+  // in the inbound feed, not a server fault, so we skip the event rather than
+  // failing the whole webhook/reconcile batch.
+  let created: typeof timeEntriesTable.$inferSelect;
+  try {
+    [created] = await db.insert(timeEntriesTable).values({
+      employeeId,
       shiftId: shiftId ?? null,
       siteId: siteId ?? null,
       clockInTime: clockIn,
       clockOutTime: clockOut ?? null,
       hoursWorked: hours ?? null,
+      approvalStatus: "pending",
+      isVerified: false,
+      externalId: payload.id,
+      externalSource: SCHEDULER_SOURCE,
       externalUpdatedAt: incomingUpdatedAt,
       syncSource: SCHEDULER_SOURCE,
-    },
-  })
-  .returning();
+    })
+    .onConflictDoUpdate({
+      target: [timeEntriesTable.externalSource, timeEntriesTable.externalId],
+      set: {
+        shiftId: shiftId ?? null,
+        siteId: siteId ?? null,
+        clockInTime: clockIn,
+        clockOutTime: clockOut ?? null,
+        hoursWorked: hours ?? null,
+        externalUpdatedAt: incomingUpdatedAt,
+        syncSource: SCHEDULER_SOURCE,
+      },
+    })
+    .returning();
+  } catch (err) {
+    if (!isOpenTimeEntryConflict(err)) throw err;
+    return { action: "skipped", skipReason: "officer already has an open time entry (already clocked in)" };
+  }
 
   return { action: "created", secureopsId: created.id, mergedExisting: false };
 }

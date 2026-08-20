@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, text, uuid, timestamp, boolean, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -116,6 +117,18 @@ export const timeEntriesTable = pgTable("time_entries", {
   // Unique constraint on (externalSource, externalId) for atomic concurrent upserts.
   // NULL values do not violate uniqueness in Postgres, so local-only rows are safe.
   externalIdx: uniqueIndex("time_entries_external_uniq").on(t.externalSource, t.externalId),
+  // Hard invariant: an officer may have at most ONE open time entry (a row with
+  // no clock_out_time) at any moment. Every clock-in path already serializes on
+  // the officer's users row (SELECT ... FOR UPDATE) and re-checks before
+  // inserting, but that is application-level only — a future path that forgets
+  // the lock would silently create a second open row and corrupt payroll /
+  // dispatch "on duty" state. This partial unique index is the database-level
+  // safety net. Callers must translate the resulting 23505 into their normal
+  // "already clocked in" response (see isOpenTimeEntryConflict in the API
+  // server) instead of surfacing a 500.
+  oneOpenPerEmployeeIdx: uniqueIndex("time_entries_one_open_per_employee_uniq")
+    .on(t.employeeId)
+    .where(sql`${t.clockOutTime} IS NULL`),
 }));
 
 export const insertTimeEntrySchema = createInsertSchema(timeEntriesTable).omit({ id: true, createdAt: true, updatedAt: true });

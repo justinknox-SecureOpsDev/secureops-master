@@ -24,6 +24,7 @@ import { businessTimeZone, businessDateIso, businessDateToUtc, businessDayWindow
 import { renderTimeCardPdf, buildTimeCardCsv } from "../lib/timeCardPdf";
 import { haversineMiles, getGeofenceRadiusMiles } from "../lib/geofence";
 import { sendPushToUsers } from "../lib/push";
+import { isOpenTimeEntryConflict } from "../lib/timeEntryConflict";
 
 const router: IRouter = Router();
 
@@ -728,32 +729,41 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     }
   }
 
-  // Atomic open-entry guard + insert. There is no database uniqueness
-  // constraint for one open entry per officer, so the initial request-time
-  // check above alone would let two rapid taps both insert. Lock the stable
-  // user row, then re-check under that lock before creating the entry.
-  const outcome = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
-    const open = await tx
-      .select({ id: timeEntriesTable.id })
-      .from(timeEntriesTable)
-      .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
-      .limit(1);
-    if (open.length > 0) return { conflict: true as const };
+  // Atomic open-entry guard + insert. The initial request-time check above
+  // alone would let two rapid taps both insert, so lock the stable user row and
+  // re-check under that lock before creating the entry. The partial unique
+  // index (one open entry per employee) is the database-level backstop: if a
+  // writer ever slips past this lock, the insert raises 23505 and we translate
+  // it into the SAME "Already clocked in" reply the in-transaction check gives.
+  let outcome: { conflict: true } | { entry: typeof timeEntriesTable.$inferSelect };
+  try {
+    outcome = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
+      const open = await tx
+        .select({ id: timeEntriesTable.id })
+        .from(timeEntriesTable)
+        .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
+        .limit(1);
+      if (open.length > 0) return { conflict: true as const };
 
-    const [entry] = await tx.insert(timeEntriesTable).values({
-      shiftId: shiftId || autoAttachedShiftId || null,
-      siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
-      employeeId: req.user!.userId,
-      clockInTime: new Date(),
-      clockInLat: hasCoords ? String(lat) : null,
-      clockInLng: hasCoords ? String(lng) : null,
-      notes: notes || null,
-      isVerified: false,
-      approvalStatus: "pending",
-    }).returning();
-    return { entry };
-  });
+      const [entry] = await tx.insert(timeEntriesTable).values({
+        shiftId: shiftId || autoAttachedShiftId || null,
+        siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
+        employeeId: req.user!.userId,
+        clockInTime: new Date(),
+        clockInLat: hasCoords ? String(lat) : null,
+        clockInLng: hasCoords ? String(lng) : null,
+        notes: notes || null,
+        isVerified: false,
+        approvalStatus: "pending",
+      }).returning();
+      return { entry };
+    });
+  } catch (err) {
+    if (!isOpenTimeEntryConflict(err)) throw err;
+    req.log.warn({ employeeId: req.user!.userId }, "[clock-in] blocked duplicate open time entry at the database");
+    outcome = { conflict: true };
+  }
 
   if ("conflict" in outcome) {
     res.status(400).json({ error: "Bad Request", message: "Already clocked in" });
@@ -943,34 +953,44 @@ router.post("/time-entries/auto-clock-in", requireStaff, async (req, res): Promi
   // entry per officer", and this endpoint may be polled repeatedly in quick
   // succession (foreground interval), so a bare check-then-insert could
   // double-clock the officer on two overlapping calls.
-  const outcome = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
-    const open = await tx
-      .select({ id: timeEntriesTable.id })
-      .from(timeEntriesTable)
-      .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
-      .limit(1);
-    if (open.length > 0) return { conflict: true as const };
+  let outcome: { conflict: true } | { entry: typeof timeEntriesTable.$inferSelect };
+  try {
+    outcome = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
+      const open = await tx
+        .select({ id: timeEntriesTable.id })
+        .from(timeEntriesTable)
+        .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
+        .limit(1);
+      if (open.length > 0) return { conflict: true as const };
 
-    const [entry] = await tx.insert(timeEntriesTable).values({
-      shiftId: match!.shiftId,
-      siteId: match!.siteId,
-      employeeId: req.user!.userId,
-      clockInTime: now,
-      clockInLat: String(latNum),
-      clockInLng: String(lngNum),
-      notes: "Auto clocked in: officer entered the site geofence at shift start.",
-      isVerified: false,
-      approvalStatus: "pending",
-    }).returning();
+      const [entry] = await tx.insert(timeEntriesTable).values({
+        shiftId: match!.shiftId,
+        siteId: match!.siteId,
+        employeeId: req.user!.userId,
+        clockInTime: now,
+        clockInLat: String(latNum),
+        clockInLng: String(lngNum),
+        notes: "Auto clocked in: officer entered the site geofence at shift start.",
+        isVerified: false,
+        approvalStatus: "pending",
+      }).returning();
 
-    await tx
-      .update(shiftsTable)
-      .set({ status: "active" })
-      .where(and(eq(shiftsTable.id, match!.shiftId), eq(shiftsTable.status, "upcoming")));
+      await tx
+        .update(shiftsTable)
+        .set({ status: "active" })
+        .where(and(eq(shiftsTable.id, match!.shiftId), eq(shiftsTable.status, "upcoming")));
 
-    return { entry };
-  });
+      return { entry };
+    });
+  } catch (err) {
+    // Database backstop for the one-open-entry-per-officer invariant: report
+    // the same quiet "already clocked in" outcome the in-transaction re-check
+    // produces, never a 500 (this endpoint is polled silently by the app).
+    if (!isOpenTimeEntryConflict(err)) throw err;
+    req.log.warn({ employeeId: req.user!.userId }, "[auto-clock-in] blocked duplicate open time entry at the database");
+    outcome = { conflict: true };
+  }
 
   if ("conflict" in outcome) {
     res.json({ triggered: false, reason: "already_clocked_in" });

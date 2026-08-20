@@ -326,10 +326,14 @@ describe("inbound clock-event dedup within ±5 min", () => {
   it("creates a separate row when the clock-in is outside the ±5 min window", async () => {
     const clockIn = relD(-6, 9);
 
+    // Already clocked out: an officer may only hold ONE open entry (partial
+    // unique index on time_entries), and the inbound event below creates a
+    // second, open one.
     await db.insert(timeEntriesTable).values({
       employeeId: ctx.employeeId,
       siteId: ctx.siteId,
       clockInTime: clockIn,
+      clockOutTime: new Date(clockIn.getTime() + 60 * 1000),
       approvalStatus: "pending",
       isVerified: false,
       syncSource: "local",

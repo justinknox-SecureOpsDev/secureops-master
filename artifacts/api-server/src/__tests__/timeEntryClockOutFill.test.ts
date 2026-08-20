@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { sql, eq, and, desc } from "drizzle-orm";
+import { sql, eq, and, desc, isNull } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -60,13 +60,21 @@ async function insertOpenEntry(opts?: {
   shiftId?: string | null;
   clockIn?: Date;
   approvalStatus?: "pending" | "approved" | "rejected";
+  employeeId?: string;
 }): Promise<string> {
+  const employeeId = opts?.employeeId ?? ctx.officerId;
+  // An officer may only ever have ONE open entry (partial unique index on
+  // time_entries), so clear any leftover open row from a previous case before
+  // seeding this one.
+  await db
+    .delete(timeEntriesTable)
+    .where(and(eq(timeEntriesTable.employeeId, employeeId), isNull(timeEntriesTable.clockOutTime)));
   const [row] = await db
     .insert(timeEntriesTable)
     .values({
       shiftId: opts?.shiftId === undefined ? ctx.shiftId : opts.shiftId,
       siteId: ctx.siteId,
-      employeeId: ctx.officerId,
+      employeeId,
       clockInTime: opts?.clockIn ?? BASE_CLOCK_IN,
       clockOutTime: null,
       hoursWorked: null,
@@ -354,7 +362,8 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
     it("leaves the shift active while another officer's entry is still open", async () => {
       const shiftId = await makeShift("active");
       const openId = await insertOpenEntry({ shiftId });
-      const stillOpenId = await insertOpenEntry({ shiftId });
+      // A DIFFERENT officer — one open entry per officer is a hard DB rule.
+      const stillOpenId = await insertOpenEntry({ shiftId, employeeId: ctx.employeeId });
 
       const res = await request(app)
         .patch(`/api/time-entries/${openId}/clock-out`)

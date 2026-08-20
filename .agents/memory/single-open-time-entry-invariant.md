@@ -1,13 +1,14 @@
 ---
 name: One-open-time-entry-per-officer invariant
-description: There is no DB-level uniqueness enforcing a single open time entry per officer; clock-in paths must guard concurrency themselves.
+description: A partial unique index enforces one open time entry per officer; every insert path (and test fixture) must expect a 23505 conflict.
 ---
 
-The system assumes an officer has at most one open `time_entries` row (`clock_out_time IS NULL`) at a time, but **there is no DB constraint enforcing it**. Every clock-in path enforces it only in application code.
+An officer may have at most one open `time_entries` row (`clock_out_time IS NULL`). This is now enforced **both** in application code and by a partial unique index on `employee_id WHERE clock_out_time IS NULL`.
 
-**Why:** the original self clock-in (`timeEntries.ts`) uses a bare check-then-insert (no tx/lock), so two concurrent clock-ins for the same officer can both pass the check and create two open entries. Without a unique constraint, nothing at the DB level stops this.
+**Why:** the original self clock-in used a bare check-then-insert, so two concurrent requests could both pass the check. Application locking fixed the known paths, but nothing stopped a *future* path from skipping the lock — the index is the backstop.
 
 **How to apply:**
-- New on-behalf/admin clock-in paths should serialize per officer — take a `SELECT ... FOR UPDATE` row lock on the officer's `users` row inside a transaction, re-check for an open entry, then insert; return 409 on conflict. (This is what the dispatch admin clock-in does.)
-- Any clock-out fallback that picks "the open entry" without an explicit id must order deterministically (e.g. most-recent `clockInTime`) so bad data never closes an arbitrary row.
-- If you ever want a hard guarantee, add a partial unique index `UNIQUE (employee_id) WHERE clock_out_time IS NULL` — but then the existing self clock-in must catch the `23505` and return a clean 400 instead of a 500.
+- Any new insert into `time_entries` with a null clock-out can raise `23505`. Translate it into that path's existing "already clocked in" answer (manual → 400, auto → `triggered:false`, dispatch on-behalf → 409, scheduler inbound → skipped), never a 500. Use the shared conflict helper in api-server's lib, which matches on the index name so unrelated unique violations (e.g. the scheduler external-id index) still surface as real errors.
+- Drizzle wraps driver errors ("Failed query: …") and hangs the pg error off `cause` — conflict detection must walk the `cause` chain, not just the top-level object.
+- Clock-in paths should still serialize per officer (`SELECT … FOR UPDATE` on the officer's `users` row inside the transaction) so the normal case returns a clean message rather than relying on the index.
+- **Test fixtures** that seed two open entries for one officer now fail with 23505. Seed the second open row under a *different* officer, or close the first one.

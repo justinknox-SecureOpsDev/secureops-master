@@ -25,6 +25,7 @@ import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
 import { broadcastOfficerJoined } from "../lib/wsManager";
+import { isOpenTimeEntryConflict } from "../lib/timeEntryConflict";
 
 const router: IRouter = Router();
 router.use("/dispatch", requireFeature("liveMap"));
@@ -745,38 +746,48 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
   // per-officer by taking a row lock on the officer's users row (FOR UPDATE)
   // inside the tx; any racing request blocks here until the first commits,
   // then sees the open entry and bails with a 409.
-  const outcome = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${userId} FOR UPDATE`);
+  let outcome: { conflict: true } | { entry: typeof timeEntriesTable.$inferSelect };
+  try {
+    outcome = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${userId} FOR UPDATE`);
 
-    const open = await tx
-      .select({ id: timeEntriesTable.id })
-      .from(timeEntriesTable)
-      .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
-      .limit(1);
-    if (open.length > 0) return { conflict: true as const };
+      const open = await tx
+        .select({ id: timeEntriesTable.id })
+        .from(timeEntriesTable)
+        .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+        .limit(1);
+      if (open.length > 0) return { conflict: true as const };
 
-    const [entry] = await tx.insert(timeEntriesTable).values({
-      shiftId: shiftId || null,
-      siteId: resolvedSiteId,
-      employeeId: userId,
-      clockInTime: new Date(),
-      clockInLat: null,
-      clockInLng: null,
-      notes: notes ? `${dispatchNote} — ${notes}` : dispatchNote,
-      isVerified: false,
-      approvalStatus: "pending",
-    }).returning();
+      const [entry] = await tx.insert(timeEntriesTable).values({
+        shiftId: shiftId || null,
+        siteId: resolvedSiteId,
+        employeeId: userId,
+        clockInTime: new Date(),
+        clockInLat: null,
+        clockInLng: null,
+        notes: notes ? `${dispatchNote} — ${notes}` : dispatchNote,
+        isVerified: false,
+        approvalStatus: "pending",
+      }).returning();
 
-    // Flip the linked shift active so My Shifts / dashboards reflect on-duty.
-    if (shiftId) {
-      await tx
-        .update(shiftsTable)
-        .set({ status: "active" })
-        .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
-    }
+      // Flip the linked shift active so My Shifts / dashboards reflect on-duty.
+      if (shiftId) {
+        await tx
+          .update(shiftsTable)
+          .set({ status: "active" })
+          .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+      }
 
-    return { entry };
-  });
+      return { entry };
+    });
+  } catch (err) {
+    // The partial unique index on time_entries (one open entry per employee)
+    // is the last line of defence behind the row lock above. Surface it as the
+    // route's normal 409, not a 500.
+    if (!isOpenTimeEntryConflict(err)) throw err;
+    req.log.warn({ officerId: userId }, "[dispatch] blocked duplicate open time entry at the database");
+    outcome = { conflict: true };
+  }
 
   if ("conflict" in outcome) {
     res.status(409).json({ error: "Conflict", message: "Officer is already clocked in." });
