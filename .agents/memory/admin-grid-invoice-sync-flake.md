@@ -17,3 +17,11 @@ collide with another file's writes.
 `artifacts/api-server/vitest.config.ts` — do NOT revert it to speed up CI.
 If a 23505-style flake appears under the full gate but passes alone,
 suspect concurrent-write pollution, not the code under test.
+
+Serializing files only isolates a suite from ITSELF. The same dev DB is also
+shared with other runs happening at the same time (parallel task validations
+and merges), which no test-runner setting can serialize. Read the failure's
+shape: the same file every time = real; a different unrelated file each
+attempt, each passing in isolation, or a count assertion inflated by rows
+nobody in this suite created = foreign-run pollution — re-run rather than
+editing the named test.

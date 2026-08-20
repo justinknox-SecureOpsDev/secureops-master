@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, usersTable, employeesTable, policiesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
 import { requireAuth, requireStaff, signToken, tokenTtlSeconds } from "../middlewares/auth";
+import { PERMISSION_KEYS, isRoleAllowed, type PermissionKey } from "../lib/permissions";
 import { disconnectUser } from "../lib/wsManager";
 import { normalizePhoneToE164 } from "../lib/phone";
 import {
@@ -140,6 +141,13 @@ export function userPayload(user: typeof usersTable.$inferSelect) {
     // financial dashboards client-side (server also enforces via
     // requireCompanyOwner on every such endpoint). See middlewares/auth.ts.
     isCompanyOwner: user.isCompanyOwner,
+    // Effective custom-role permission keys for this user's CURRENT role
+    // (lib/permissions.ts matrix, admin implicitly allowed). Advisory only —
+    // it lets a client decide which permission-gated surface to render
+    // instead of firing a request that is guaranteed to 403. Every endpoint
+    // still enforces the same matrix server-side, and this is recomputed on
+    // every /auth/me so a toggle change takes effect on the next page load.
+    permissions: PERMISSION_KEYS.filter((k) => isRoleAllowed(k as PermissionKey, user.role)),
     createdAt: user.createdAt,
     // Cosmetic per-user personalization (e.g. saved nav tab order). Must be
     // returned here or saved preferences vanish on the next page load.

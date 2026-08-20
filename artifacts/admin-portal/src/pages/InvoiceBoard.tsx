@@ -10,8 +10,9 @@ import { Label } from "@/components/ui/label";
 import { api, fetchWithAuth } from "@/lib/api";
 import { hoursByLevel, levelLabel } from "@/lib/invoiceLevels";
 import { formatDate, formatTime } from "@/lib/format";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useHasPermission } from "@/lib/auth";
 import { OwnerLockedState } from "@/components/OwnerGate";
+import { InvoiceTransactionList } from "@/components/InvoiceTransactionList";
 
 // One work session behind an invoice line item, as returned by
 // GET /invoices/:id/entries. Times are UTC ISO strings; rendered in the
@@ -263,6 +264,10 @@ function defaultPeriodForCycle(cycle: string): { start: string; end: string } {
 export default function InvoiceBoardPage() {
   const { user } = useAuth();
   const isOwner = !!user?.isCompanyOwner;
+  // Bookkeeper path: not an owner (so no aggregate board), but the role holds
+  // the transactional finance permission the sanitized GET /invoices list is
+  // gated on. Show the plain list instead of a dead end.
+  const canBrowseTransactions = useHasPermission("finance.transactions");
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
@@ -779,7 +784,17 @@ export default function InvoiceBoardPage() {
           <Receipt className="w-7 h-7 brand-gold" />
           <h1 className="text-2xl font-semibold text-brand-navy">Invoice Board</h1>
         </div>
-        <OwnerLockedState label="invoice board" />
+        {canBrowseTransactions ? (
+          <>
+            <p className="text-sm text-muted-foreground mb-6">
+              Invoices you can open and work on. Period totals and revenue roll-ups stay with
+              company owners.
+            </p>
+            <InvoiceTransactionList />
+          </>
+        ) : (
+          <OwnerLockedState label="invoice board" />
+        )}
       </div>
     );
   }

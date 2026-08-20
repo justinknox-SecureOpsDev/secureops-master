@@ -882,6 +882,12 @@ export const LoginResponse = zod.object({
       .describe(
         "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
       ),
+    permissions: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side.",
+      ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
       .object({
@@ -957,6 +963,12 @@ export const ChangePasswordResponse = zod.object({
       .optional()
       .describe(
         "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
+      ),
+    permissions: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side.",
       ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
@@ -1189,6 +1201,12 @@ export const ResetPasswordResponse = zod.object({
       .describe(
         "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
       ),
+    permissions: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side.",
+      ),
     createdAt: zod.coerce.date(),
     uiPreferences: zod
       .object({
@@ -1248,6 +1266,12 @@ export const GetMeResponse = zod.object({
     .optional()
     .describe(
       "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
+    ),
+  permissions: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side.",
     ),
   createdAt: zod.coerce.date(),
   uiPreferences: zod
@@ -6127,6 +6151,12 @@ export const AcknowledgePoliciesResponse = zod.object({
     .optional()
     .describe(
       "Independent of role. Gates ONLY company-wide financial dashboards (revenue\/margin\/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call.",
+    ),
+  permissions: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side.",
     ),
   createdAt: zod.coerce.date(),
   uiPreferences: zod

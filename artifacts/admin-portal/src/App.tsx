@@ -155,6 +155,12 @@ function Routed() {
           <Route path="/tables/shifts" component={LegacyShiftsRedirect} />
           <Route path="/account/security" component={SecurityPage} />
           <Route path="/radio" component={RadioPage} />
+          {/* Bookkeeper surfaces: reachable only when this dispatcher's role
+              holds finance.transactions (the boards themselves render the
+              sanitized list view for a non-owner, and the underlying API is
+              gated the same way). */}
+          <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
           <Route component={RootAwareNotFound} />
         </Switch>
       ) : (

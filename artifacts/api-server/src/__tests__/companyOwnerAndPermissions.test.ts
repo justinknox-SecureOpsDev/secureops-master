@@ -264,6 +264,31 @@ describe("Non-owner bookkeepers with finance.transactions can browse (sanitized)
     expect(invoiceRow.totalAmount).toBe("5000.00");
   });
 
+  // The two axes draw the line at AGGREGATE vs SINGLE RECORD, not at "any
+  // dollar figure". `finance.transactions` is the transaction-level grant:
+  // its holder may create, price, edit, send and inspect ONE invoice —
+  // which necessarily means seeing that invoice's own amounts and rates.
+  // What it must never yield is the company-wide picture (board roll-ups,
+  // revenue/margin), which is why the list response is sanitized even though
+  // the per-record routes are not. Locking this down so a later change can't
+  // quietly move a route across that line in either direction.
+  it("keeps per-record invoice detail available to the permission holder while the aggregate board stays owner-only", async () => {
+    // Per-record: allowed (this is the work the permission exists for).
+    const entriesRes = await request(app)
+      .get(`/api/invoices/${invoiceId}/entries`)
+      .set(authed(ctx.nonOwnerAdminToken));
+    expect(entriesRes.status).toBe(200);
+
+    const pdfRes = await request(app)
+      .get(`/api/invoices/${invoiceId}/pdf`)
+      .set(authed(ctx.nonOwnerAdminToken));
+    expect(pdfRes.status).toBe(200);
+
+    // Company-wide: still refused without the owner flag.
+    const boardRes = await request(app).get("/api/payroll/board").set(authed(ctx.nonOwnerAdminToken));
+    expect(boardRes.status).toBe(403);
+  });
+
   it("granting finance.transactions to site_manager lets a non-owner site_manager browse both (sanitized) lists", async () => {
     const grant = await request(app)
       .patch("/api/admin/permissions/finance.transactions")
@@ -282,6 +307,42 @@ describe("Non-owner bookkeepers with finance.transactions can browse (sanitized)
     const invoiceRow = invoicesRes.body.find((r: { id: string }) => r.id === invoiceId);
     expect(invoiceRow).toBeDefined();
     expect(invoiceRow.totalAmount).toBeUndefined();
+  });
+});
+
+// The admin portal has to know, before it renders, whether the signed-in user
+// may browse the sanitized payroll/invoice lists — otherwise a bookkeeper
+// still lands on the owner-locked dead end. /auth/me carries the caller's
+// effective permission keys for exactly that decision (advisory only; every
+// endpoint re-checks the same matrix).
+describe("/auth/me exposes the caller's effective permission keys", () => {
+  afterAll(async () => {
+    await db.delete(permissionOverridesTable).where(eq(permissionOverridesTable.key, "finance.transactions"));
+    clearPermissionOverrideInMemory("finance.transactions");
+  });
+
+  it("includes finance.transactions for an admin and omits it for an officer", async () => {
+    const adminMe = await request(app).get("/api/auth/me").set(authed(ctx.nonOwnerAdminToken));
+    expect(adminMe.status).toBe(200);
+    expect(adminMe.body.permissions).toContain("finance.transactions");
+
+    const officerMe = await request(app).get("/api/auth/me").set(authed(ctx.officerToken));
+    expect(officerMe.status).toBe(200);
+    expect(officerMe.body.permissions).not.toContain("finance.transactions");
+  });
+
+  it("reflects a granted toggle on the next /auth/me with no re-login", async () => {
+    const before = await request(app).get("/api/auth/me").set(authed(ctx.siteManagerToken));
+    expect(before.body.permissions).not.toContain("finance.transactions");
+
+    const grant = await request(app)
+      .patch("/api/admin/permissions/finance.transactions")
+      .set(authed(ctx.ownerAdminToken))
+      .send({ allowedRoles: ["admin", "site_manager"] });
+    expect(grant.status).toBe(200);
+
+    const after = await request(app).get("/api/auth/me").set(authed(ctx.siteManagerToken));
+    expect(after.body.permissions).toContain("finance.transactions");
   });
 });
 

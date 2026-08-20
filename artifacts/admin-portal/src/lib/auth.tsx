@@ -19,6 +19,14 @@ type User = {
    * gated endpoint enforces this server-side regardless of what this shows.
    */
   isCompanyOwner?: boolean;
+  /**
+   * Effective custom-role permission keys for this user's current role
+   * (e.g. "finance.transactions"), as returned by /auth/me. Advisory only —
+   * used to decide which permission-gated surface to render instead of
+   * firing a request that is guaranteed to 403. The server enforces the same
+   * matrix on every endpoint regardless of what this contains.
+   */
+  permissions?: string[];
 };
 type AuthCtx = {
   user: User | null;
@@ -102,4 +110,14 @@ export function useAuth(): AuthCtx {
   const v = useContext(Ctx);
   if (!v) throw new Error("useAuth must be used inside AuthProvider");
   return v;
+}
+
+/**
+ * True when the signed-in user's role currently holds `key` in the server's
+ * permission matrix. UI convenience only — never a security boundary; the
+ * matching endpoint re-checks the same key server-side.
+ */
+export function useHasPermission(key: string): boolean {
+  const { user } = useAuth();
+  return !!user?.permissions?.includes(key);
 }

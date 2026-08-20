@@ -129,6 +129,7 @@ export function buildNavGroups(
   isSuperAdmin = false,
   featureEnabled: (key: FeatureKey) => boolean = () => true,
   isCompanyOwner = false,
+  hasFinanceTransactions = false,
 ): NavGroup[] {
   // Admin-only landing dashboard. Listed first so `/` resolves here (exact
   // match — "/" only prefix-matches itself, so it never shadows other routes).
@@ -308,6 +309,20 @@ export function buildNavGroups(
           { href: "/shifts", label: "Shifts", Icon: CalendarRange },
         ],
       },
+      // Bookkeeper surfaces: only when this role has been granted the
+      // transactional finance permission. Both pages render the plain,
+      // sanitized record list for a non-owner (no company totals).
+      ...(hasFinanceTransactions
+        ? [{
+            key: "accounting",
+            label: "Accounting",
+            Icon: Calculator,
+            items: [
+              { href: "/payroll/board", label: "Payroll", Icon: Wallet, feature: "payroll" as FeatureKey },
+              { href: "/invoices/board", label: "Invoices", Icon: Receipt, feature: "invoicing" as FeatureKey },
+            ],
+          }]
+        : []),
       accountGroup,
     ]);
   }
@@ -415,8 +430,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // preference. `navOrderOverride` reflects a save made this session without
   // waiting for a /auth/me refetch.
   const defaultGroups = useMemo(
-    () => buildNavGroups(isDispatcher, isSuperAdmin, isFeatureEnabled, !!user?.isCompanyOwner),
-    [isDispatcher, isSuperAdmin, user?.isCompanyOwner],
+    () => buildNavGroups(
+      isDispatcher,
+      isSuperAdmin,
+      isFeatureEnabled,
+      !!user?.isCompanyOwner,
+      !!user?.permissions?.includes("finance.transactions"),
+    ),
+    [isDispatcher, isSuperAdmin, user?.isCompanyOwner, user?.permissions],
   );
   const [navOrderOverride, setNavOrderOverride] = useState<string[] | null>(null);
   const savedNavOrder = navOrderOverride ?? user?.uiPreferences?.navGroupOrder ?? null;

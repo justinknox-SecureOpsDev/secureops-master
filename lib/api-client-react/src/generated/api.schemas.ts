@@ -246,6 +246,8 @@ export interface User {
   mustSignPolicies?: boolean;
   /** Independent of role. Gates ONLY company-wide financial dashboards (revenue/margin/profit, payroll & invoice totals, exports) — never platform super-admin. Re-read live on every request, so revocation is effective on the very next API call. */
   isCompanyOwner?: boolean;
+  /** Effective custom-role permission keys for this user's current role (e.g. finance.transactions), recomputed on every response. Advisory only — it lets a client pick which permission-gated surface to render instead of firing a request that is guaranteed to 403; every endpoint still enforces the same matrix server-side. */
+  permissions?: string[];
   createdAt: string;
   uiPreferences?: UiPreferences;
 }

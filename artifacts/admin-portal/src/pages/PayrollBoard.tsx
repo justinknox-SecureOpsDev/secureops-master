@@ -9,8 +9,9 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { OfficerEditReviewDialog, type OfficerEditEntry } from "@/components/OfficerEditReviewDialog";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useHasPermission } from "@/lib/auth";
 import { OwnerLockedState } from "@/components/OwnerGate";
+import { PayrollTransactionList } from "@/components/PayrollTransactionList";
 
 type BoardBucket = {
   employeeId: string;
@@ -122,6 +123,10 @@ const statusPill = (status: BoardGroup["status"]) => {
 export default function PayrollBoardPage() {
   const { user } = useAuth();
   const isOwner = !!user?.isCompanyOwner;
+  // Bookkeeper path: not an owner (so no aggregate board), but the role holds
+  // the transactional finance permission the sanitized GET /payroll list is
+  // gated on. Show the plain list instead of a dead end.
+  const canBrowseTransactions = useHasPermission("finance.transactions");
   const [, setLocation] = useLocation();
   const [groups, setGroups] = useState<BoardGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -448,7 +453,17 @@ export default function PayrollBoardPage() {
           <Banknote className="w-7 h-7 brand-gold" />
           <h1 className="text-2xl font-semibold text-brand-navy">Payroll Board</h1>
         </div>
-        <OwnerLockedState label="payroll board" />
+        {canBrowseTransactions ? (
+          <>
+            <p className="text-sm text-muted-foreground mb-6">
+              Payroll entries you can open and work on. Company-wide totals and the pay-run
+              hand-off stay with company owners.
+            </p>
+            <PayrollTransactionList />
+          </>
+        ) : (
+          <OwnerLockedState label="payroll board" />
+        )}
       </div>
     );
   }

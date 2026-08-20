@@ -39,10 +39,32 @@ grant/revoke accidentally touch role-based capabilities.
   total, so it stays visible to any admin with no gating needed. Check the
   actual field type before adding it to the strip list or gating the route.
 - `GET /payroll` and `GET /invoices` (plain lists, not just the "board" view)
-  were deliberately folded into the full-gate set as an accepted scope
-  tradeoff — a non-owner with the transactional permission can create/edit a
-  single record by ID but cannot browse the list to find it. Flagged as a
-  follow-up rather than solved inline.
+  were initially folded into the full-gate set, then reopened to
+  owner-OR-`finance.transactions` with sanitize-in-place, because a
+  bookkeeper who can edit a record by ID but cannot list records has no way
+  to find one. The BOARD endpoints (`/payroll/board`, aggregate roll-ups)
+  stay hard-gated; only the flat record lists are shared.
+
+The line is AGGREGATE vs SINGLE RECORD, not "any dollar figure". The
+transactional permission necessarily lets its holder see one record's own
+amounts (they can price, edit and send that record); only the company-wide
+picture is owner-only. **How to apply:** don't "fix" a per-record detail
+route that shows amounts to a permission holder — that is the grant working.
+Do question any route that aggregates across records.
+
+## Client-side permission gating needs the key list on the user object
+
+A permission-gated surface can't decide what to render from `role` alone,
+because the matrix is admin-editable at runtime; the session identity must
+carry the caller's effective keys. Treat that list as advisory routing
+information only — the server re-checks the same matrix.
+**Why:** a client that guesses from role either hides a granted surface or
+fires requests that are guaranteed to 403.
+
+Granting a permission is not the same as making its surface reachable: the
+portal admits only some roles, and each role branch has its own routes and
+navigation. A surface newly opened to another role must be added to that
+role's branch too, or the grant is invisible.
 
 ## Reuse the existing live-reload, don't invent a new one
 
@@ -151,6 +173,11 @@ admin), don't swap the outer middleware at all — replace the inline
 role-name check with `isRoleAllowed(key, role)` so self-edit stays always
 allowed regardless of the toggle, while only the "act on someone else"
 branch becomes permission-gated.
+
+Adding any new export to the portal's auth module breaks every existing
+`vi.mock("@/lib/auth", ...)` factory that only listed `useAuth` (the new hook
+comes back undefined and the component throws) — grep for that mock and
+extend each factory in the same change.
 
 ## Running the full api-server test suite in a time-boxed shell
 
