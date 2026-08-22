@@ -12,8 +12,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import {
   db,
+  clientsTable,
   platformBrandConfigTable,
   platformFeatureOverridesTable,
   platformCustomerConfigTable,
@@ -27,6 +29,7 @@ import {
 } from "../lib/confirmEditWindowConfig";
 
 const SECRET = "control-plane-integration-test-secret";
+const TEST_CUSTOMER_ID = `control-plane-agreement-${randomUUID()}`;
 let prevSecret: string | undefined;
 
 beforeAll(() => {
@@ -44,6 +47,9 @@ afterAll(async () => {
   await db
     .delete(platformCustomerConfigTable)
     .where(eq(platformCustomerConfigTable.id, "singleton"));
+  await db
+    .delete(clientsTable)
+    .where(eq(clientsTable.externalCustomerId, TEST_CUSTOMER_ID));
   // Reset the in-memory live-apply singleton this suite mutated back to its
   // env default so later test files aren't polluted.
   applyConfirmEditWindowConfig(null);
@@ -95,6 +101,114 @@ describe("/api/control-plane (HMAC)", () => {
     expect(res.body).toHaveProperty("features");
     expect(Array.isArray(res.body.features)).toBe(true);
     expect(res.body).toHaveProperty("version");
+  });
+
+  it("creates a modern agreement draft without signature evidence", async () => {
+    process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+
+    const profilePayload = JSON.stringify({
+      legalName: "Agreement Contract Test LLC",
+      primaryContactName: "Contract Test",
+      primaryContactEmail: "contract-test@example.test",
+    });
+    const profile = await request(app)
+      .put(`/api/control-plane/customers/${TEST_CUSTOMER_ID}/profile`)
+      .set(
+        CONTROL_PLANE_SIGNATURE_HEADER,
+        signControlPlanePayload(profilePayload, SECRET),
+      )
+      .set("Content-Type", "application/json")
+      .send(profilePayload);
+    expect(profile.status).toBe(200);
+    expect(profile.body.client.externalCustomerId).toBe(TEST_CUSTOMER_ID);
+
+    const draftPayload = JSON.stringify({
+      templateKey: "master_services_agreement",
+      templateVersion: "1",
+      title: "SOBBU Master Services Agreement",
+      renderedContent: "Authoritative rendered MSA content.",
+      mergeSnapshot: {
+        legalName: "Agreement Contract Test LLC",
+      },
+    });
+    const created = await request(app)
+      .post(`/api/control-plane/customers/${TEST_CUSTOMER_ID}/agreements`)
+      .set(
+        CONTROL_PLANE_SIGNATURE_HEADER,
+        signControlPlanePayload(draftPayload, SECRET),
+      )
+      .set("Content-Type", "application/json")
+      .send(draftPayload);
+
+    expect(created.status).toBe(201);
+    expect(created.body.agreement).toMatchObject({
+      templateKey: "master_services_agreement",
+      templateVersion: "1",
+      title: "SOBBU Master Services Agreement",
+      renderedContent: "Authoritative rendered MSA content.",
+      status: "draft",
+      signedAt: null,
+      signedByEmail: null,
+      signedByName: null,
+      typedSignerName: null,
+      signatureVersionSeen: null,
+      signatureHashSeen: null,
+    });
+    for (const legacyField of [
+      "slot",
+      "signerName",
+      "signerTitle",
+      "signerEmail",
+      "signatureText",
+    ]) {
+      expect(created.body.agreement).not.toHaveProperty(legacyField);
+    }
+
+    const retried = await request(app)
+      .post(`/api/control-plane/customers/${TEST_CUSTOMER_ID}/agreements`)
+      .set(
+        CONTROL_PLANE_SIGNATURE_HEADER,
+        signControlPlanePayload(draftPayload, SECRET),
+      )
+      .set("Content-Type", "application/json")
+      .send(draftPayload);
+    expect(retried.status).toBe(201);
+    expect(retried.body.agreement.id).toBe(created.body.agreement.id);
+
+    const list = await request(app)
+      .get(`/api/control-plane/customers/${TEST_CUSTOMER_ID}/agreements`)
+      .set(
+        CONTROL_PLANE_SIGNATURE_HEADER,
+        signControlPlanePayload("", SECRET),
+      );
+    expect(list.status).toBe(200);
+    expect(list.body.agreements).toEqual([
+      expect.objectContaining({
+        id: created.body.agreement.id,
+        status: "draft",
+        signedAt: null,
+      }),
+    ]);
+  });
+
+  it("rejects the legacy signature-submission body as a draft", async () => {
+    process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+    const payload = JSON.stringify({
+      slot: "msa",
+      signerName: "Fabricated Signer",
+      signerTitle: "Fabricated Title",
+      signerEmail: "fabricated@example.test",
+      signatureText: "Fabricated Signature",
+    });
+    const res = await request(app)
+      .post(`/api/control-plane/customers/${TEST_CUSTOMER_ID}/agreements`)
+      .set(
+        CONTROL_PLANE_SIGNATURE_HEADER,
+        signControlPlanePayload(payload, SECRET),
+      )
+      .set("Content-Type", "application/json")
+      .send(payload);
+    expect(res.status).toBe(400);
   });
 
   it("writes a brand override with a valid signature", async () => {

@@ -1,4 +1,13 @@
-import { pgTable, text, uuid, timestamp, integer, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  timestamp,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -16,11 +25,22 @@ export const clientsTable = pgTable("clients", {
   billingCycle: text("billing_cycle").notNull().default("weekly"),
   notes: text("notes"),
   contractDocKey: text("contract_doc_key"),
+  // External tenant/service identifier set by the Control Plane. Optional for
+  // clients created directly in the tenant application.
+  externalCustomerId: text("external_customer_id"),
+  legalName: text("legal_name"),
+  primaryContactName: text("primary_contact_name"),
+  primaryContactEmail: text("primary_contact_email"),
+  primaryContactPhone: text("primary_contact_phone"),
+  serviceAddress: text("service_address"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   // Backs the admin grid's default sort (createdAt desc) + id tiebreaker.
   createdIdx: index("clients_created_idx").on(t.createdAt, t.id),
+  externalCustomerIdUniq: uniqueIndex("clients_external_customer_id_uniq")
+    .on(t.externalCustomerId)
+    .where(sql`external_customer_id IS NOT NULL`),
 }));
 
 export const insertClientSchema = createInsertSchema(clientsTable).omit({ id: true, createdAt: true, updatedAt: true });

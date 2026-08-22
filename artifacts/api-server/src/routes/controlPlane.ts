@@ -17,7 +17,8 @@
  */
 
 import { Router } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import {
   db,
   platformFeatureOverridesTable,
@@ -25,6 +26,8 @@ import {
   platformCustomerConfigTable,
   platformAgreementSignaturesTable,
   platformAgreementDocsTable,
+  clientsTable,
+  clientAgreementsTable,
 } from "@workspace/db";
 import { AGREEMENT_SLOTS, AGREEMENT_TITLES } from "@workspace/legal-docs";
 import { z } from "zod/v4";
@@ -60,6 +63,324 @@ const storage = new ObjectStorageService();
 
 // Every route under /control-plane requires a valid HMAC signature.
 router.use("/control-plane", requireControlPlaneHmac);
+
+// ---------------------------------------------------------------------------
+// Control Plane customer profile and agreement drafts
+// ---------------------------------------------------------------------------
+
+const customerProfileBodySchema = z.object({
+  clientId: z.string().uuid().optional(),
+  legalName: z.string().min(1),
+  primaryContactName: z.string().min(1).optional(),
+  primaryContactEmail: z.email().optional(),
+  primaryContactPhone: z.string().optional(),
+  billingAddress: z.string().optional(),
+  serviceAddress: z.string().optional(),
+});
+
+const createAgreementBodySchema = z.object({
+  templateKey: z.string().min(1),
+  templateVersion: z.string().optional(),
+  title: z.string().min(1),
+  renderedContent: z.string().trim().min(1).max(50_000),
+  mergeSnapshot: z.record(z.string(), z.unknown()).optional(),
+  expiresAt: z.string().datetime({ offset: true }).optional(),
+});
+
+function safeClientProfile(client: typeof clientsTable.$inferSelect) {
+  return {
+    id: client.id,
+    externalCustomerId: client.externalCustomerId,
+    name: client.name,
+    legalName: client.legalName,
+    primaryContactName: client.primaryContactName,
+    primaryContactEmail: client.primaryContactEmail,
+    primaryContactPhone: client.primaryContactPhone,
+    contactName: client.contactName,
+    contactEmail: client.contactEmail,
+    contactPhone: client.contactPhone,
+    billingAddress: client.billingAddress,
+    serviceAddress: client.serviceAddress,
+    paymentTermsDays: client.paymentTermsDays,
+    createdAt: client.createdAt,
+    updatedAt: client.updatedAt,
+  };
+}
+
+function safeAgreement(agreement: typeof clientAgreementsTable.$inferSelect) {
+  return {
+    id: agreement.id,
+    clientId: agreement.clientId,
+    templateKey: agreement.templateKey,
+    templateVersion: agreement.templateVersion,
+    version: agreement.version,
+    title: agreement.title,
+    status: agreement.status,
+    renderedContent: agreement.renderedContent,
+    contentHash: agreement.contentHash,
+    mergeSnapshot: agreement.mergeSnapshot,
+    expiresAt: agreement.expiresAt,
+    sentAt: agreement.sentAt,
+    sentBy: agreement.sentBy,
+    signedAt: agreement.signedAt,
+    signedByEmail: agreement.signedByEmail,
+    signedByName: agreement.signedByName,
+    typedSignerName: agreement.typedSignerName,
+    signatureVersionSeen: agreement.signatureVersionSeen,
+    signatureHashSeen: agreement.signatureHashSeen,
+    viewedAt: agreement.viewedAt,
+    declinedAt: agreement.declinedAt,
+    declineReason: agreement.declineReason,
+    supersededAt: agreement.supersededAt,
+    supersededByAgreementId: agreement.supersededByAgreementId,
+    expiredAt: agreement.expiredAt,
+    hasDocument: Boolean(agreement.documentStorageKey),
+    hasCompletedDocument: Boolean(agreement.completedDocumentStorageKey),
+    createdAt: agreement.createdAt,
+    updatedAt: agreement.updatedAt,
+  };
+}
+
+async function resolveClientByExternalId(externalCustomerId: string) {
+  const [client] = await db
+    .select()
+    .from(clientsTable)
+    .where(eq(clientsTable.externalCustomerId, externalCustomerId))
+    .limit(1);
+  return client ?? null;
+}
+
+router.put(
+  "/control-plane/customers/:externalCustomerId/profile",
+  async (req, res) => {
+    const { externalCustomerId } = req.params;
+    if (!externalCustomerId?.trim()) {
+      res
+        .status(400)
+        .json({ error: "Bad Request", message: "externalCustomerId required" });
+      return;
+    }
+
+    const parsed = customerProfileBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Bad Request", issues: parsed.error.issues });
+      return;
+    }
+
+    const {
+      clientId,
+      legalName,
+      primaryContactName,
+      primaryContactEmail,
+      primaryContactPhone,
+      billingAddress,
+      serviceAddress,
+    } = parsed.data;
+
+    try {
+      let existing: typeof clientsTable.$inferSelect | undefined;
+      if (clientId) {
+        [existing] = await db
+          .select()
+          .from(clientsTable)
+          .where(eq(clientsTable.id, clientId))
+          .limit(1);
+        if (!existing) {
+          res
+            .status(404)
+            .json({ error: "Not Found", message: "clientId not found" });
+          return;
+        }
+      } else {
+        [existing] = await db
+          .select()
+          .from(clientsTable)
+          .where(eq(clientsTable.externalCustomerId, externalCustomerId))
+          .limit(1);
+      }
+
+      const patch: Record<string, unknown> = {
+        externalCustomerId,
+        legalName,
+        updatedAt: new Date(),
+      };
+      if (primaryContactName !== undefined) {
+        patch.primaryContactName = primaryContactName;
+        patch.contactName = primaryContactName;
+      }
+      if (primaryContactEmail !== undefined) {
+        patch.primaryContactEmail = primaryContactEmail;
+        patch.contactEmail = primaryContactEmail;
+      }
+      if (primaryContactPhone !== undefined) {
+        patch.primaryContactPhone = primaryContactPhone;
+        patch.contactPhone = primaryContactPhone;
+      }
+      if (billingAddress !== undefined) patch.billingAddress = billingAddress;
+      if (serviceAddress !== undefined) patch.serviceAddress = serviceAddress;
+
+      let client: typeof clientsTable.$inferSelect;
+      if (existing) {
+        [client] = await db
+          .update(clientsTable)
+          .set(patch)
+          .where(eq(clientsTable.id, existing.id))
+          .returning();
+      } else {
+        [client] = await db
+          .insert(clientsTable)
+          .values({ name: legalName, ...patch })
+          .returning();
+      }
+
+      res.json({ client: safeClientProfile(client) });
+    } catch (error) {
+      req.log?.error(
+        { err: error },
+        "[control-plane/customers] profile upsert error",
+      );
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  },
+);
+
+router.get(
+  "/control-plane/customers/:externalCustomerId/agreements",
+  async (req, res) => {
+    const client = await resolveClientByExternalId(
+      req.params.externalCustomerId,
+    );
+    if (!client) {
+      res
+        .status(404)
+        .json({ error: "Not Found", message: "Customer not found" });
+      return;
+    }
+
+    try {
+      const agreements = await db
+        .select()
+        .from(clientAgreementsTable)
+        .where(eq(clientAgreementsTable.clientId, client.id))
+        .orderBy(clientAgreementsTable.createdAt);
+      res.json({ agreements: agreements.map(safeAgreement) });
+    } catch (error) {
+      req.log?.error(
+        { err: error },
+        "[control-plane/agreements] list error",
+      );
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  },
+);
+
+router.post(
+  "/control-plane/customers/:externalCustomerId/agreements",
+  async (req, res) => {
+    const client = await resolveClientByExternalId(
+      req.params.externalCustomerId,
+    );
+    if (!client) {
+      res
+        .status(404)
+        .json({ error: "Not Found", message: "Customer not found" });
+      return;
+    }
+
+    const parsed = createAgreementBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Bad Request", issues: parsed.error.issues });
+      return;
+    }
+
+    const requestFingerprint = createHash("sha256")
+      .update(JSON.stringify(parsed.data), "utf8")
+      .digest("hex");
+
+    try {
+      const [existing] = await db
+        .select()
+        .from(clientAgreementsTable)
+        .where(
+          and(
+            eq(clientAgreementsTable.clientId, client.id),
+            eq(
+              clientAgreementsTable.requestFingerprint,
+              requestFingerprint,
+            ),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        res.status(201).json({ agreement: safeAgreement(existing) });
+        return;
+      }
+
+      const agreement = await db.transaction(async (tx) => {
+        const result = await tx.execute<{ current_version: number }>(sql`
+          INSERT INTO client_agreement_version_seqs
+            (client_id, template_key, current_version)
+          VALUES (${client.id}::uuid, ${parsed.data.templateKey}, 1)
+          ON CONFLICT (client_id, template_key)
+          DO UPDATE
+            SET current_version =
+              client_agreement_version_seqs.current_version + 1
+          RETURNING current_version
+        `);
+        const version = result.rows[0]?.current_version ?? 1;
+
+        const [created] = await tx
+          .insert(clientAgreementsTable)
+          .values({
+            clientId: client.id,
+            templateKey: parsed.data.templateKey,
+            templateVersion: parsed.data.templateVersion ?? null,
+            requestFingerprint,
+            version,
+            title: parsed.data.title,
+            status: "draft",
+            renderedContent: parsed.data.renderedContent,
+            mergeSnapshot: parsed.data.mergeSnapshot ?? null,
+            expiresAt: parsed.data.expiresAt
+              ? new Date(parsed.data.expiresAt)
+              : null,
+          })
+          .returning();
+        return created;
+      });
+      res.status(201).json({ agreement: safeAgreement(agreement) });
+    } catch (error) {
+      // A concurrent retry may win the unique-fingerprint race. Its transaction
+      // commits; this transaction (including the version increment) rolls back.
+      const [existing] = await db
+        .select()
+        .from(clientAgreementsTable)
+        .where(
+          and(
+            eq(clientAgreementsTable.clientId, client.id),
+            eq(
+              clientAgreementsTable.requestFingerprint,
+              requestFingerprint,
+            ),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        res.status(201).json({ agreement: safeAgreement(existing) });
+        return;
+      }
+      req.log?.error(
+        { err: error },
+        "[control-plane/agreements] create error",
+      );
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  },
+);
 
 async function readBrandRow() {
   const [config] = await db
