@@ -12,6 +12,7 @@ import { initConfigReadiness } from "./lib/configReadiness";
 import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
 import { restoreStrandedOnboardingApplicants } from "./lib/restoreStrandedOnboarding";
 import { backfillCompanyOwnersFromAdminRole } from "./lib/companyOwner";
+import { setInternalBaseUrl } from "./lib/assistant/internalDispatch";
 
 const rawPort = process.env["PORT"];
 
@@ -65,6 +66,11 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
+  // Tell the assistant's loopback dispatcher which port to reuse. Its actions
+  // are ordinary requests to our own routes, as the signed-in user — see
+  // lib/assistant/internalDispatch.ts. Without this it would open its own
+  // ephemeral listener; with it, there is exactly one server in the process.
+  setInternalBaseUrl(`http://127.0.0.1:${port}`);
   // Background maintenance — currently just expired-revoked-token cleanup.
   // Kept inside listen() so it only starts once the server is actually up.
   startScheduledJobs();

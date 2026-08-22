@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +72,14 @@ export default function SubcontractorPayRunPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [paidRef, setPaidRef] = useState("");
+  // Per-attempt idempotency key for "Mark Paid": generated once when a
+  // submission attempt starts and reused for any rapid duplicate invocation
+  // (double-click) until the attempt fully settles (request done + cooldown
+  // elapsed). The server replays the original response for a duplicate key
+  // instead of re-running the update — see officer Pay Run for the same
+  // pattern.
+  const [markPaidCooldown, setMarkPaidCooldown] = useState(false);
+  const markPaidIdemKeyRef = useRef<string | null>(null);
 
   const authHeaders = useMemo(
     () => ({ "Content-Type": "application/json" }),
@@ -178,20 +186,56 @@ export default function SubcontractorPayRunPage() {
   };
 
   const markPaid = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || markPaidCooldown) return;
+    // Per-attempt idempotency key: reused for any rapid duplicate invocation
+    // (double-click) until the attempt fully settles; the server replays the
+    // original response for duplicate keys instead of re-running the update.
+    if (!markPaidIdemKeyRef.current) markPaidIdemKeyRef.current = crypto.randomUUID();
+    const idempotencyKey = markPaidIdemKeyRef.current;
     setBusy("paid");
     try {
       const res = await fetchWithAuth("/api/subcontractor-pay-run/mark-paid", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual" }),
+        body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual", idempotencyKey }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        let body: { message?: string; code?: string } | null = null;
+        try { body = await res.json(); } catch { /* not a JSON body */ }
+        // "idempotency_in_flight" (see IDEMPOTENT_IN_FLIGHT_CODE in
+        // api-server/src/lib/idempotency.ts) means an identical request under
+        // this SAME key is still being processed elsewhere — it is not a
+        // refusal, the write may be committing right now. Keep the key so a
+        // retry joins/replays that outcome instead of starting a second
+        // write under a fresh key.
+        if (res.status === 409 && body?.code === "idempotency_in_flight") {
+          throw new Error(body?.message || "An identical request is still being processed.");
+        }
+        // A definite server-side refusal: the write did not happen, and the
+        // idempotency middleware itself evicts non-2xx outcomes, so a retry
+        // should be a fresh attempt rather than reusing a dead key.
+        markPaidIdemKeyRef.current = null;
+        throw new Error(body?.message || `HTTP ${res.status}`);
+      }
       const j = await res.json();
       showToast("ok", `Marked ${j.marked} as paid.`);
       setPaidRef("");
+      // Post-success cooldown (~2s): the key is held through the cooldown
+      // (duplicates replay), then rotated so a fresh action can start.
+      setMarkPaidCooldown(true);
+      window.setTimeout(() => {
+        setMarkPaidCooldown(false);
+        markPaidIdemKeyRef.current = null;
+      }, 2000);
       await reload();
     } catch (e) {
+      // Do NOT rotate the key here for a network/transport failure (timeout,
+      // dropped connection, lost response) — that outcome is ambiguous, the
+      // write may already have committed on the server. Keeping the SAME key
+      // means a deliberate retry either replays the original response or
+      // joins the still-running attempt, instead of risking a second write.
+      // The key is only cleared above, for a confirmed non-replayable
+      // (>=400) server refusal.
       showToast("err", `Mark paid failed: ${(e as Error).message}`);
     } finally {
       setBusy(null);
@@ -279,7 +323,7 @@ export default function SubcontractorPayRunPage() {
             value={paidRef}
             onChange={(e) => setPaidRef(e.target.value)}
           />
-          <Button variant="outline" className="text-brand-navy" onClick={markPaid} disabled={selected.size === 0 || busy !== null}>
+          <Button variant="outline" className="text-brand-navy" onClick={markPaid} disabled={selected.size === 0 || busy !== null || markPaidCooldown}>
             {busy === "paid" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
             Mark Paid
           </Button>

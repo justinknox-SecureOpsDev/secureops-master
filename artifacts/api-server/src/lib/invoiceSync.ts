@@ -7,6 +7,8 @@ import {
   shiftsTable,
   timeEntriesTable,
   usersTable,
+  employeesTable,
+  siteRatesTable,
   subcontractorTimeEntriesTable,
   subcontractorQrTokensTable,
   type TimeEntry,
@@ -90,6 +92,27 @@ export async function collectInvoicePeriodEntries(
 ): Promise<InvoicePeriodEntry[]> {
   const out: InvoicePeriodEntry[] = [];
 
+  // Per-level site rate card, lowest tier per level (same "lowest tier wins"
+  // rule as the shift-creation resolver) — this is the correct bill-rate
+  // source for an entry whose shift carries no billRate of its own (or none
+  // at all); the flat `siteBillRate` legacy default is only the last resort
+  // for a level with no card row.
+  const cardRows = await db
+    .select({ licenseLevel: siteRatesTable.licenseLevel, rateTier: siteRatesTable.rateTier, billRate: siteRatesTable.billRate })
+    .from(siteRatesTable)
+    .where(eq(siteRatesTable.siteId, siteId));
+  const cardBillByLevel = new Map<number, number>();
+  const cardTierByLevel = new Map<number, number>();
+  for (const r of cardRows) {
+    const bill = parseFloat(String(r.billRate ?? "0"));
+    if (!(bill > 0)) continue;
+    // Lower rateTier wins regardless of row order (mirrors the shift-creation resolver).
+    if (r.rateTier < (cardTierByLevel.get(r.licenseLevel) ?? Infinity)) {
+      cardTierByLevel.set(r.licenseLevel, r.rateTier);
+      cardBillByLevel.set(r.licenseLevel, bill);
+    }
+  }
+
   // Approved officer entries for this site+period.
   const entries = await db
     .select({
@@ -99,12 +122,14 @@ export async function collectInvoicePeriodEntries(
       clockOutTime: timeEntriesTable.clockOutTime,
       shiftBillRate: shiftsTable.billRate,
       shiftLevel: shiftsTable.requiredLicenseLevel,
+      employeeLevel: employeesTable.siaLicenseLevel,
       employeeFirst: usersTable.firstName,
       employeeLast: usersTable.lastName,
     })
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(timeEntriesTable.employeeId, employeesTable.userId))
     .where(
       and(
         or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
@@ -117,10 +142,11 @@ export async function collectInvoicePeriodEntries(
     const hoursRaw = parseFloat(String(e.hoursWorked ?? "0"));
     const hours = isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
     const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
-    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
+    const level = e.shiftLevel ?? e.employeeLevel ?? null;
+    const cardBill = level != null ? cardBillByLevel.get(level) : undefined;
+    const baseRate = shiftBill > 0 ? shiftBill : cardBill ?? siteBillRate;
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
-    const level = e.shiftLevel ?? null;
     // Federal-holiday premium (1.5×): hours worked on a US federal holiday
     // (clock-in date in PAYROLL_TIMEZONE) are billed at time-and-a-half and
     // split into their own line item so the client sees the premium plainly.

@@ -96,6 +96,15 @@ export const timeEntriesTable = pgTable("time_entries", {
   // force-clear it via approve/correct. One escalation per entry, ever —
   // the job only selects rows where this is NULL.
   confirmationEscalatedAt: timestamp("confirmation_escalated_at", { withTimezone: true }),
+  // Debounce for the automated "stuck open shift" admin alert (see
+  // notifyStuckOpenShifts in scheduledJobs.ts). Stamped whenever admins are
+  // paged about this entry being stuck (per the shared isStuckOpenEntry
+  // policy in lib/stuckShift.ts); the job re-notifies on a daily cadence
+  // (not on every tick) until the entry is closed, so a long-abandoned entry
+  // keeps nudging admins without spamming them. Reset is never needed on
+  // clock-out — the job's own `clock_out_time IS NULL` filter already
+  // excludes closed entries.
+  stuckShiftNotifiedAt: timestamp("stuck_shift_notified_at", { withTimezone: true }),
   // External-sync fields for Event Staff Scheduler integration.
   // externalId = the scheduler's clock-event ID; used for idempotent upsert.
   // externalSource = 'scheduler' (only known external source).

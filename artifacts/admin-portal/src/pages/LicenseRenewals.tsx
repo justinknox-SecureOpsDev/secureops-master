@@ -3,6 +3,10 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Loader2, IdCard, Check, X, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  LICENSE_REMINDER_TIER_DAYS,
+  formatReminderTierDaysList,
+} from "@workspace/license-reminder-schedule";
 
 type RenewalRow = {
   id: string;
@@ -100,7 +104,8 @@ export default function LicenseRenewalsPage() {
       <p className="text-sm text-muted-foreground mb-4">
         Officers submit renewed license details + a photo from the mobile app. Approving here
         updates the underlying license row and clears its reminder bookkeeping so the new
-        expiry restarts the 30/14/7-day cycle.
+        expiry restarts the reminder cycle. Officers are reminded at{" "}
+        {formatReminderTierDaysList(LICENSE_REMINDER_TIER_DAYS)} before a license expires.
       </p>
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

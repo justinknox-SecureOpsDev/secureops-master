@@ -88,6 +88,33 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 }
 
 /**
+ * Authenticated upload for the subcontractor self-service portal. Uses its
+ * own request-url endpoint (requireSubcontractor, not requireStaff) since
+ * subcontractor accounts are an external role excluded from the generic
+ * staff upload path.
+ */
+export async function uploadFileSubcontractor(file: File): Promise<UploadedFile> {
+  return uploadFileTo(file, "/subcontractor-portal/uploads/request-url");
+}
+
+/**
+ * Open a subcontractor's own uploaded document (W-9, COI PDF) in a new tab.
+ * Signs via the subcontractor-scoped endpoint, which proves ownership by
+ * the `/objects/uploads/u/<userId>/` key prefix rather than a DB lookup.
+ */
+export async function openSignedObjectSubcontractor(objectPath: string): Promise<void> {
+  const win = window.open("", "_blank");
+  try {
+    const { url } = await api<{ url: string }>(`/subcontractor-portal/storage/sign?path=${encodeURIComponent(objectPath)}`);
+    if (win) win.location.href = url;
+    else window.open(url, "_blank");
+  } catch (e) {
+    if (win) win.close();
+    alert(`Failed to open file: ${(e as Error).message}`);
+  }
+}
+
+/**
  * Anonymous upload for the public HR pipeline (Apply / Onboard / Amend).
  *
  * Unlike the authenticated flow (presigned PUT URL → direct GCS write),

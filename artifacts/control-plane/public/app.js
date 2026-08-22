@@ -43,6 +43,31 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function errorText(err) {
+  return (err && err.message) || "Unknown error";
+}
+
+/**
+ * Whether the tenant backend (or this control plane's own auth/lookup)
+ * refused the request outright, in which case nothing was written and we may
+ * say so. Mirrors admin-portal's settingsStatus.ts writeWasRefused().
+ *
+ * Only a 4xx proves refusal. A 5xx can mean the tenant errored — or committed
+ * the write and then failed to answer — and a status-less error means the
+ * proxy call never got a reply at all; both are UNKNOWN, never "not saved".
+ */
+function writeWasRefused(err) {
+  return typeof err.status === "number" && err.status >= 400 && err.status < 500;
+}
+
+/** Render a save/load result message into the given container element id. */
+function setInlineMsg(wrapId, kind, text) {
+  var el = $(wrapId);
+  if (!el) return;
+  var role = kind === "ok" ? "status" : "alert";
+  el.innerHTML = "<p class='settings-msg " + kind + "' role='" + role + "'>" + esc(text) + "</p>";
+}
+
 function toast(msg, isError) {
   const t = $("toast");
   t.textContent = msg;
@@ -695,6 +720,12 @@ let settingsCustomer = null;
 // toggle callbacks started for a previous customer can detect they are stale
 // and discard their results instead of overwriting the current modal.
 let settingsGeneration = 0;
+// The last successfully-read `{ brand, features, customerConfig, agreementDocs }`
+// payload for settingsCustomer — i.e. what the tenant backend is ACTUALLY
+// running, not what an operator has typed. Kept around so a failed re-read
+// (after a load or an ambiguous save) can keep showing last-known values
+// instead of blanking the panel. Reset whenever the modal opens a new customer.
+let settingsRemote = null;
 
 // ---- Onboarding checklist ----
 
@@ -817,6 +848,7 @@ async function openSettings(c) {
   // Increment the modal generation so any in-flight load from the previous
   // customer can detect it is stale and discard its results.
   var myGen = ++settingsGeneration;
+  settingsRemote = null;
   $("settings-title").childNodes[0].textContent = "Remote settings \u2014 " + c.name + " ";
   $("settings-lifecycle").innerHTML = lifecycleBadge(c);
   $("settings-build-status").innerHTML = buildStatusDetails(c);
@@ -835,20 +867,80 @@ async function openSettings(c) {
     await loadHistory(c);
     return;
   }
+  await loadRemoteSettings(c, myGen);
+  await loadHistory(c);
+}
+
+/**
+ * Read the customer's ACTUAL remote settings (brand + features + plan/billing
+ * + agreement docs) and render them. On failure, never fall through to a
+ * blank/default-looking panel — label the failure and offer a retry, keeping
+ * whatever was last successfully read on screen if we have it.
+ */
+async function loadRemoteSettings(c, gen) {
   try {
     const data = await api("/customers/" + c.id + "/remote-settings");
-    if (data.status !== 200) {
-      $("settings-body").innerHTML =
-        "<p class='error'>Customer backend returned " + data.status +
-        ". Check that its CONTROL_PLANE_SHARED_SECRET matches the one stored here.</p>";
-      await loadHistory(c);
-      return;
-    }
-    renderSettings(data.remote);
+    if (settingsGeneration !== gen) return;
+    settingsRemote = data.remote;
+    renderSettings(settingsRemote);
   } catch (err) {
-    $("settings-body").innerHTML = "<p class='error'>" + esc(err.message) + "</p>";
+    if (settingsGeneration !== gen) return;
+    renderRemoteSettingsFailure(c, gen, err);
   }
-  await loadHistory(c);
+}
+
+function renderRemoteSettingsFailure(c, gen, err) {
+  var hasLastKnown = !!settingsRemote;
+  var notice =
+    "<div class='settings-msg error' role='alert'>" +
+    "Couldn't load remote settings: " + esc(errorText(err)) + "." +
+    (hasLastKnown
+      ? " Showing the last values this page read; they may be out of date."
+      : " Nothing is shown below rather than the built-in defaults, which would look like an unconfigured company.") +
+    " <button type='button' class='ghost small' id='retry-remote-settings'>Retry</button>" +
+    "</div>";
+  if (hasLastKnown) {
+    renderSettings(settingsRemote);
+    $("settings-body").insertAdjacentHTML("afterbegin", notice);
+  } else {
+    $("settings-body").innerHTML = notice;
+  }
+  var btn = $("retry-remote-settings");
+  if (btn) {
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      btn.textContent = "Retrying\u2026";
+      loadRemoteSettings(c, gen);
+    });
+  }
+}
+
+/**
+ * A save whose outcome is unknown (5xx, or no answer at all) must never be
+ * rendered as success or failure — re-read what's actually stored and show
+ * that instead. See .agents/memory/unknown-vs-empty-ui-state.md.
+ */
+async function confirmAmbiguousWrite(msgWrapId, err) {
+  var capturedGen = settingsGeneration;
+  var c = settingsCustomer;
+  var before = settingsRemote;
+  setInlineMsg(
+    msgWrapId,
+    "warn",
+    "Couldn't confirm the save (" + errorText(err) + ") \u2014 re-checking what's actually stored\u2026",
+  );
+  await loadRemoteSettings(c, capturedGen);
+  if (settingsGeneration !== capturedGen || settingsRemote === before) {
+    // Generation moved on, or the re-read itself failed and already rendered
+    // its own labelled failure state — don't stomp it with a stale message.
+    return;
+  }
+  setInlineMsg(
+    msgWrapId,
+    "warn",
+    "Couldn't confirm the save (" + errorText(err) +
+      "). The fields above now show what is stored \u2014 if they didn't change, try again.",
+  );
 }
 
 async function loadHistory(c) {
@@ -893,6 +985,7 @@ function renderSettings(remote) {
   html += brandField("hrEmail", "HR email", brand.hrEmail);
   html += brandField("adminNotifyEmail", "Admin notify email", brand.adminNotifyEmail);
   html += "</div><button id='save-brand' class='primary'>Save brand</button>";
+  html += "<div id='brand-msg-wrap'></div>";
 
   html += "<h3>Feature flags</h3><div class='features'>";
   features.forEach(function (f) {
@@ -902,6 +995,7 @@ function renderSettings(remote) {
       (f.envDisabled ? " <span class='muted small'>(env-locked)</span>" : "") + "</label>";
   });
   html += "</div><button id='save-features' class='primary'>Save features</button>";
+  html += "<div id='features-msg-wrap'></div>";
 
   html += renderAgreements((remote && remote.agreementDocs) || []);
   $("settings-body").innerHTML = html;
@@ -1120,6 +1214,7 @@ function renderPlanBilling(config) {
   html += "</div>";
   html += "<label>Billing notes<textarea id='pb-billingNotes' rows='2'>" + esc(c.billingNotes || "") + "</textarea></label>";
   html += "<button id='save-plan-billing' class='primary'>Save plan &amp; billing</button>";
+  html += "<div id='pb-msg-wrap'></div>";
   return html;
 }
 
@@ -1187,17 +1282,28 @@ async function savePlanBilling() {
     // Blank clears the company-wide override, restoring the 10-minute fallback.
     autoClockOutDelayMinutes: numOrNull($("pb-autoClockOut").value, true),
   };
+  var capturedGen = settingsGeneration;
   try {
     const r = await api("/customers/" + settingsCustomer.id + "/remote-settings/plan-billing", {
       method: "PUT",
       body: JSON.stringify(body),
     });
-    if (r.status === 200) {
-      toast("Plan & billing updated");
-      await loadHistory(settingsCustomer);
-    } else toast("Backend returned " + r.status, true);
+    if (settingsGeneration !== capturedGen) return;
+    // The tenant's reply is authoritative — apply and re-render it, rather
+    // than leaving the panel showing only what the operator typed.
+    settingsRemote = Object.assign({}, settingsRemote, { customerConfig: r.remote && r.remote.customerConfig });
+    renderSettings(settingsRemote);
+    toast("Plan & billing updated");
+    setInlineMsg("pb-msg-wrap", "ok", "Saved \u2014 the fields above are what the tenant is now running.");
+    await loadHistory(settingsCustomer);
   } catch (err) {
-    toast(planBillingErrorMessage(err), true);
+    if (settingsGeneration !== capturedGen) return;
+    if (writeWasRefused(err)) {
+      setInlineMsg("pb-msg-wrap", "error", "Not saved \u2014 " + planBillingErrorMessage(err));
+      toast("Plan & billing not saved", true);
+      return;
+    }
+    await confirmAmbiguousWrite("pb-msg-wrap", err);
   }
 }
 
@@ -1207,17 +1313,26 @@ async function saveBrand() {
   inputs.forEach(function (el) {
     body[el.getAttribute("data-brand")] = el.value.trim();
   });
+  var capturedGen = settingsGeneration;
   try {
     const r = await api("/customers/" + settingsCustomer.id + "/remote-settings/brand", {
       method: "PUT",
       body: JSON.stringify(body),
     });
-    if (r.status === 200) {
-      toast("Brand updated");
-      await loadHistory(settingsCustomer);
-    } else toast("Backend returned " + r.status, true);
+    if (settingsGeneration !== capturedGen) return;
+    settingsRemote = Object.assign({}, settingsRemote, { brand: r.remote && r.remote.brand });
+    renderSettings(settingsRemote);
+    toast("Brand updated");
+    setInlineMsg("brand-msg-wrap", "ok", "Saved \u2014 the fields above are what the tenant is now running.");
+    await loadHistory(settingsCustomer);
   } catch (err) {
-    toast(err.message, true);
+    if (settingsGeneration !== capturedGen) return;
+    if (writeWasRefused(err)) {
+      setInlineMsg("brand-msg-wrap", "error", "Not saved \u2014 " + errorText(err));
+      toast("Brand not saved", true);
+      return;
+    }
+    await confirmAmbiguousWrite("brand-msg-wrap", err);
   }
 }
 
@@ -1228,17 +1343,28 @@ async function saveFeatures() {
     if (el.disabled) return;
     updates.push({ key: el.getAttribute("data-feature"), enabled: el.checked });
   });
+  var capturedGen = settingsGeneration;
   try {
     const r = await api("/customers/" + settingsCustomer.id + "/remote-settings/features", {
       method: "PUT",
       body: JSON.stringify({ updates: updates }),
     });
-    if (r.status === 200) {
-      toast("Features updated");
-      await loadHistory(settingsCustomer);
-    } else toast("Backend returned " + r.status, true);
+    if (settingsGeneration !== capturedGen) return;
+    // The tenant's reply is authoritative — apply and re-render it, rather
+    // than leaving the toggles showing only what the operator clicked.
+    settingsRemote = Object.assign({}, settingsRemote, { features: r.remote && r.remote.features });
+    renderSettings(settingsRemote);
+    toast("Features updated");
+    setInlineMsg("features-msg-wrap", "ok", "Saved \u2014 the toggles above are what the tenant is now running.");
+    await loadHistory(settingsCustomer);
   } catch (err) {
-    toast(err.message, true);
+    if (settingsGeneration !== capturedGen) return;
+    if (writeWasRefused(err)) {
+      setInlineMsg("features-msg-wrap", "error", "Not saved \u2014 " + errorText(err));
+      toast("Features not saved", true);
+      return;
+    }
+    await confirmAmbiguousWrite("features-msg-wrap", err);
   }
 }
 

@@ -33,6 +33,7 @@ import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsAreaPage from "@/pages/ShiftsArea";
 import AuditLogPage from "@/pages/AuditLog";
+import AssistantPage from "@/pages/Assistant";
 import ShiftRecoveryPage from "@/pages/ShiftRecovery";
 import SwapRequestsPage from "@/pages/SwapRequests";
 import LicenseRenewalsPage from "@/pages/LicenseRenewals";
@@ -55,14 +56,18 @@ import SchedulerIntegrationPage from "@/pages/SchedulerIntegration";
 import OrgInvitePage from "@/pages/OrgInvite";
 import NotFound from "@/pages/not-found";
 import { ClientShell } from "@/pages/ClientShell";
+import { SubcontractorShell } from "@/pages/SubcontractorShell";
 import { MandatoryPasswordChange } from "@/pages/MandatoryPasswordChange";
 import ClientUsers from "@/pages/ClientUsers";
+import SubcontractorInvites from "@/pages/SubcontractorInvites";
 import CoverageRequests from "@/pages/CoverageRequests";
 import PlatformFeaturesPage from "@/pages/PlatformFeatures";
 import LegalAgreementsPage from "@/pages/LegalAgreements";
 import AgreementSignPage from "@/pages/AgreementSign";
 import PermissionsPage from "@/pages/Permissions";
 import CompanyOwnersPage from "@/pages/CompanyOwners";
+import PayrollEntryDetailPage from "@/pages/PayrollEntryDetail";
+import InvoiceDetailPage from "@/pages/InvoiceDetail";
 import { FeatureGuard } from "@/components/FeatureGate";
 
 const queryClient = new QueryClient({
@@ -120,7 +125,23 @@ function Routed() {
     return <ClientShell />;
   }
 
-  if (user.role !== "admin" && user.role !== "dispatcher") {
+  // Subcontractor (vendor) portal users get their own isolated shell —
+  // same pattern as the client portal above.
+  if (user.role === "subcontractor") {
+    return <SubcontractorShell />;
+  }
+
+  // A site_manager granted finance.transactions via Settings → Permissions is
+  // a bookkeeper: the backend already authorizes them on GET/PUT
+  // /payroll/:id and /invoices/:id exactly like a dispatcher with the same
+  // grant (Task #744), but without this carve-out they had no route into the
+  // admin portal at all to reach it — the role check below would otherwise
+  // unconditionally bounce them to the mobile app. Every other site_manager
+  // (no grant) keeps going straight to OfficerAppRedirect, unchanged.
+  const isSiteManagerBookkeeper =
+    user.role === "site_manager" && !!user.permissions?.includes("finance.transactions");
+
+  if (user.role !== "admin" && user.role !== "dispatcher" && !isSiteManagerBookkeeper) {
     // Officers/employees don't belong in the admin portal — they end up here
     // when they open the portal URL (old invite links, a bookmark, word of
     // mouth) and sign in. Instead of dead-ending them on an "admin access
@@ -139,11 +160,31 @@ function Routed() {
     return <ClientPortalNotice email={user.email} />;
   }
 
+  // Same dead-end guard as /client above, for a staff account that opens a
+  // subcontractor invite link/bookmark (role === "subcontractor" branch
+  // above renders it only for actual vendor accounts).
+  if (location === "/subcontractor" || location.startsWith("/subcontractor/")) {
+    return <ClientPortalNotice email={user.email} />;
+  }
+
   const isDispatcher = user.role === "dispatcher";
 
   return (
     <AppShell>
-      {isDispatcher ? (
+      {isSiteManagerBookkeeper ? (
+        <Switch>
+          <Route path="/" component={BookkeeperHomeRedirect} />
+          {/* Same finance.transactions gate, same two pages a dispatcher
+              bookkeeper reaches — see the dispatcher and admin branches
+              below for the identical routes. */}
+          <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
+          <Route path="/payroll/:id">{() => <FeatureGuard feature="payroll"><PayrollEntryDetailPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/:id">{() => <FeatureGuard feature="invoicing"><InvoiceDetailPage /></FeatureGuard>}</Route>
+          <Route path="/account/security" component={SecurityPage} />
+          <Route component={RootAwareNotFound} />
+        </Switch>
+      ) : isDispatcher ? (
         <Switch>
           <Route path="/" component={DispatchHomeRedirect} />
           <Route path="/dispatch" component={DispatchPage} />
@@ -161,6 +202,11 @@ function Routed() {
               gated the same way). */}
           <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
           <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
+          {/* The transaction lists' "Open" link for a non-admin bookkeeper —
+              same finance.transactions gate as the boards above, scoped to
+              one record. See PayrollTransactionList/InvoiceTransactionList. */}
+          <Route path="/payroll/:id">{() => <FeatureGuard feature="payroll"><PayrollEntryDetailPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/:id">{() => <FeatureGuard feature="invoicing"><InvoiceDetailPage /></FeatureGuard>}</Route>
           <Route component={RootAwareNotFound} />
         </Switch>
       ) : (
@@ -184,9 +230,18 @@ function Routed() {
           <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
           <Route path="/payroll/pay-run">{() => <FeatureGuard feature="payroll"><PayRunPage /></FeatureGuard>}</Route>
           <Route path="/payroll/time-card" component={TimeCardPage} />
+          {/* The transaction lists' "Open" link for a non-admin bookkeeper —
+              same finance.transactions gate as the boards above, scoped to
+              one record. Placed after every other literal /payroll and
+              /invoices route so it only catches an actual record id. See
+              PayrollTransactionList/InvoiceTransactionList. */}
+          <Route path="/payroll/:id">{() => <FeatureGuard feature="payroll"><PayrollEntryDetailPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/:id">{() => <FeatureGuard feature="invoicing"><InvoiceDetailPage /></FeatureGuard>}</Route>
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
+          <Route path="/subcontractors/invites" component={SubcontractorInvites} />
           <Route path="/audit-log" component={AuditLogPage} />
+          <Route path="/assistant">{() => <FeatureGuard feature="assistant"><AssistantPage /></FeatureGuard>}</Route>
           <Route path="/recovery/shifts" component={ShiftRecoveryPage} />
           <Route path="/swap-requests">{() => <FeatureGuard feature="swapRequests"><SwapRequestsPage /></FeatureGuard>}</Route>
           <Route path="/hr/license-renewals">{() => <FeatureGuard feature="licenseRenewals"><LicenseRenewalsPage /></FeatureGuard>}</Route>
@@ -302,6 +357,17 @@ function DispatchHomeRedirect() {
   // Dispatchers land on the unified command center.
   if (typeof window !== "undefined") {
     queueMicrotask(() => navigate("/dispatch", { replace: true }));
+  }
+  return null;
+}
+
+function BookkeeperHomeRedirect() {
+  const [, navigate] = useLocation();
+  // A bookkeeper site_manager's only two surfaces are payroll and invoices —
+  // land on payroll, matching the dispatcher bookkeeper's Accounting tab
+  // default (its first item is also Payroll).
+  if (typeof window !== "undefined") {
+    queueMicrotask(() => navigate("/payroll/board", { replace: true }));
   }
   return null;
 }

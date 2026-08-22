@@ -19,9 +19,22 @@ import { resolvePayRate, type PayRateSource } from "../lib/payRate";
 import { businessTimeZone, businessDateToUtc, startOfBusinessWeek } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
 import { submitMultipayment, getPaymentStatusByCustomerRef, mapRowToInstruction, isPncConfigured } from "../lib/pncPayments";
+import { idempotentWriteWith } from "../lib/idempotency";
 
 const router: IRouter = Router();
 router.use("/payroll", requireFeature("payroll"));
+
+// Both pay-run money movers commit on the way through, so a caller whose answer
+// was lost cannot safely re-send. They use the same shared replay protection as
+// every other money-touching write — one set of TTL, eviction and scoping rules
+// to keep correct. See lib/idempotency.ts.
+//
+// The key travels as an `Idempotency-Key` header or, as the admin portal sends
+// it, an `idempotencyKey` body field. `replayBodyFlag` keeps the
+// `idempotentReplay: true` marker these two routes have always put in a
+// replayed body, alongside the standard header, so existing callers see no
+// change. Absent a key, nothing changes.
+const idempotentPayRunWrite = idempotentWriteWith({ replayBodyFlag: true });
 
 function addDays(d: Date, n: number): Date {
   const x = new Date(d);
@@ -409,13 +422,7 @@ router.post("/payroll/pay-run/export-csv", requireCompanyOwner, async (req, res)
   res.status(200).send(csv);
 });
 
-// Idempotency for mark-paid mirrors the PNC submit pattern: the client may send
-// an `idempotencyKey`. Requests carrying a key already seen within the last 5
-// minutes (scoped per admin user) do NOT re-run the UPDATE — they await/replay
-// the original response, so a double-click on a slow network can never produce a
-// confusing "no rows" second result. Failures are evicted so a retry still works.
 type MarkPaidResult = { status: number; body: Record<string, unknown> };
-const markPaidIdempotencyCache = new Map<string, { expiresAt: number; promise: Promise<MarkPaidResult> }>();
 
 async function processMarkPaid(
   req: Request,
@@ -450,54 +457,25 @@ async function processMarkPaid(
   };
 }
 
-router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promise<void> => {
+// Replay protection: `idempotentPayRunWrite` (see the note beside it). A
+// double-click on a slow network replays the original response instead of
+// re-running the UPDATE, so the second click can never produce a confusing
+// "no rows" result.
+router.post("/payroll/pay-run/mark-paid", requireAdmin, idempotentPayRunWrite, async (req, res): Promise<void> => {
   const bodyParsed = z
     .object({
       ids: z.array(z.string()).min(1),
       paymentReference: z.union([z.string(), z.null()]).optional(),
       method: z.string().optional(),
-      idempotencyKey: z.string().min(8).max(128).optional(),
     })
     .safeParse(req.body ?? {});
   if (!bodyParsed.success) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });
     return;
   }
-  const { ids, paymentReference, method, idempotencyKey } = bodyParsed.data;
+  const { ids, paymentReference, method } = bodyParsed.data;
 
-  if (!idempotencyKey) {
-    const result = await processMarkPaid(req, ids, paymentReference, method);
-    res.status(result.status).json(result.body);
-    return;
-  }
-
-  // Scope keys per admin user so one admin's key cannot replay another's response.
-  const cacheKey = `${req.user!.userId}:${idempotencyKey}`;
-  const now = Date.now();
-  for (const [k, v] of markPaidIdempotencyCache) {
-    if (v.expiresAt <= now) markPaidIdempotencyCache.delete(k);
-  }
-
-  const existing = markPaidIdempotencyCache.get(cacheKey);
-  if (existing) {
-    const result = await existing.promise;
-    res.status(result.status).json({ ...result.body, idempotentReplay: true });
-    return;
-  }
-
-  const promise = processMarkPaid(req, ids, paymentReference, method);
-  markPaidIdempotencyCache.set(cacheKey, { expiresAt: now + PNC_IDEMPOTENCY_TTL_MS, promise });
-
-  let result: MarkPaidResult;
-  try {
-    result = await promise;
-  } catch (err) {
-    markPaidIdempotencyCache.delete(cacheKey);
-    throw err;
-  }
-  if (result.status >= 400) {
-    markPaidIdempotencyCache.delete(cacheKey);
-  }
+  const result = await processMarkPaid(req, ids, paymentReference, method);
   res.status(result.status).json(result.body);
 });
 
@@ -591,14 +569,10 @@ router.post("/payroll/pay-run/pnc-preflight", requireAdmin, async (req, res): Pr
 // skip them, preventing duplicate bank submissions. On PNC success rows advance
 // to 'processed'; on any failure they are rolled back to 'pending'.
 //
-// Idempotency: the client may send an `idempotencyKey` (UUID). Requests carrying
-// a key already seen within the last 5 minutes (scoped per admin user) do NOT
-// re-run the submission — they await/replay the original response, so a
-// double-click can never produce a second PNC API call (not even an empty one).
-// Failed outcomes are evicted from the cache so a deliberate retry still works.
+// Replay protection: `idempotentPayRunWrite` (see the note beside it). A
+// duplicate submission is answered from the first one, so a double-click can
+// never produce a second PNC API call (not even an empty one).
 type PncSubmitResult = { status: number; body: Record<string, unknown> };
-const PNC_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
-const pncIdempotencyCache = new Map<string, { expiresAt: number; promise: Promise<PncSubmitResult> }>();
 
 async function processPncPayRun(req: Request, ids: string[]): Promise<PncSubmitResult> {
   const rows = await loadPayRunRows(ids);
@@ -821,7 +795,7 @@ async function processPncPayRun(req: Request, ids: string[]): Promise<PncSubmitR
   };
 }
 
-router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void> => {
+router.post("/payroll/pay-run/pnc", requireAdmin, idempotentPayRunWrite, async (req, res): Promise<void> => {
   if (!isPncConfigured()) {
     res.status(503).json({
       error: "Service Unavailable",
@@ -832,56 +806,15 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
   }
 
   const bodyParsed = z
-    .object({
-      ids: z.array(z.string()).min(1),
-      idempotencyKey: z.string().min(8).max(128).optional(),
-    })
+    .object({ ids: z.array(z.string()).min(1) })
     .safeParse(req.body ?? {});
   if (!bodyParsed.success) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });
     return;
   }
-  const { ids, idempotencyKey } = bodyParsed.data;
+  const { ids } = bodyParsed.data;
 
-  if (!idempotencyKey) {
-    const result = await processPncPayRun(req, ids);
-    res.status(result.status).json(result.body);
-    return;
-  }
-
-  // Scope keys per admin user so one admin's key cannot replay another's response.
-  const cacheKey = `${req.user!.userId}:${idempotencyKey}`;
-  const now = Date.now();
-  for (const [k, v] of pncIdempotencyCache) {
-    if (v.expiresAt <= now) pncIdempotencyCache.delete(k);
-  }
-
-  const existing = pncIdempotencyCache.get(cacheKey);
-  if (existing) {
-    // Duplicate within the window — replay (or await) the original outcome.
-    // No second PNC call happens.
-    const result = await existing.promise;
-    res.status(result.status).json({ ...result.body, idempotentReplay: true });
-    return;
-  }
-
-  const promise = processPncPayRun(req, ids);
-  pncIdempotencyCache.set(cacheKey, { expiresAt: now + PNC_IDEMPOTENCY_TTL_MS, promise });
-
-  let result: PncSubmitResult;
-  try {
-    result = await promise;
-  } catch (err) {
-    // Unexpected throw — evict so a retry is possible, then rethrow to the
-    // default error handler.
-    pncIdempotencyCache.delete(cacheKey);
-    throw err;
-  }
-  if (result.status >= 400) {
-    // Don't pin failures for 5 minutes — the admin should be able to fix the
-    // problem and deliberately retry with a fresh submission.
-    pncIdempotencyCache.delete(cacheKey);
-  }
+  const result = await processPncPayRun(req, ids);
   res.status(result.status).json(result.body);
 });
 
@@ -2117,17 +2050,84 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
   });
 });
 
+// Single payroll entry — the read half of the same day-to-day transactional
+// surface PUT /payroll/:id already exposes to anyone with finance.transactions
+// (independent of the company-owner flag). This is what a non-owner, non-admin
+// bookkeeper's "Open" link on the transaction list resolves to, since the
+// admin data grid's per-record screen (/tables/payroll_entries?focus=<id>) is
+// requireAdmin-gated and stays that way. Same fields, same authorization tier
+// as the PUT — this is not a broader read than the edit action already grants.
+router.get("/payroll/:id", ...requirePayrollTransactionPermission, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [row] = await db
+    .select({
+      id: payrollEntriesTable.id,
+      employeeId: payrollEntriesTable.employeeId,
+      siteId: payrollEntriesTable.siteId,
+      siteName: sitesTable.name,
+      periodStart: payrollEntriesTable.periodStart,
+      periodEnd: payrollEntriesTable.periodEnd,
+      totalHours: payrollEntriesTable.totalHours,
+      hourlyRate: payrollEntriesTable.hourlyRate,
+      grossPay: payrollEntriesTable.grossPay,
+      tax: payrollEntriesTable.tax,
+      netPay: payrollEntriesTable.netPay,
+      status: payrollEntriesTable.status,
+      paidAt: payrollEntriesTable.paidAt,
+      paidMethod: payrollEntriesTable.paidMethod,
+      paymentReference: payrollEntriesTable.paymentReference,
+      notes: payrollEntriesTable.notes,
+      createdAt: payrollEntriesTable.createdAt,
+      employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
+    })
+    .from(payrollEntriesTable)
+    .leftJoin(usersTable, eq(payrollEntriesTable.employeeId, usersTable.id))
+    .leftJoin(sitesTable, eq(payrollEntriesTable.siteId, sitesTable.id))
+    .where(eq(payrollEntriesTable.id, id));
+  if (!row) { res.status(404).json({ error: "Not Found" }); return; }
+
+  // 1099 contractors — no tax is withheld; net always equals gross. Same
+  // normalization as the list, so this single-record view can never show a
+  // stale withheld amount the list wouldn't.
+  res.json({ ...row, tax: "0", netPay: row.grossPay });
+});
+
 router.put("/payroll/:id", ...requirePayrollTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { status, notes } = req.body;
+  const { status, notes, paidAt, paidMethod, paymentReference } = req.body;
   const updates: Record<string, unknown> = {};
   if (status) {
     updates.status = status;
     if (status === "paid") updates.paidAt = new Date();
   }
   if (notes !== undefined) updates.notes = notes;
+  // Bookkeeper-editable payment-record fields (finance.transactions, same
+  // gate as the rest of this route) — mirrors what the admin grid's generic
+  // CRUD already allows on this table, just scoped to this single record.
+  // An explicit paidAt here overrides the auto-stamp above, so a bookkeeper
+  // backdating a payment (mark paid + set the real payment date) wins.
+  if (paidAt !== undefined) {
+    if (paidAt === null || paidAt === "") {
+      updates.paidAt = null;
+    } else {
+      const d = new Date(paidAt);
+      if (!Number.isNaN(d.getTime())) updates.paidAt = d;
+    }
+  }
+  if (paidMethod !== undefined) {
+    if (paidMethod === null || paidMethod === "") {
+      updates.paidMethod = null;
+    } else if (["manual", "ach_csv", "stripe"].includes(paidMethod)) {
+      updates.paidMethod = paidMethod;
+    }
+  }
+  if (paymentReference !== undefined) updates.paymentReference = paymentReference === "" ? null : paymentReference;
 
-  const [entry] = await db.update(payrollEntriesTable).set(updates).where(eq(payrollEntriesTable.id, id)).returning();
+  // A body with only an invalid paidMethod (or otherwise nothing recognized)
+  // leaves `updates` empty — an empty SET is a SQL error, not a no-op update.
+  const entry = Object.keys(updates).length > 0
+    ? (await db.update(payrollEntriesTable).set(updates).where(eq(payrollEntriesTable.id, id)).returning())[0]
+    : (await db.select().from(payrollEntriesTable).where(eq(payrollEntriesTable.id, id)))[0];
   if (!entry) { res.status(404).json({ error: "Not Found" }); return; }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, entry.employeeId));
   res.json({ ...entry, employeeName: user ? `${user.firstName} ${user.lastName}` : null });

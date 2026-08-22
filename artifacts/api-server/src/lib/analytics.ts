@@ -26,6 +26,7 @@ import {
   employeesTable,
   shiftAssignmentsTable,
   incidentsTable,
+  siteRatesTable,
 } from "@workspace/db";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
 import { resolvePayRate } from "./payRate";
@@ -165,6 +166,8 @@ interface EntryRow {
   siteId: string | null;
   siteName: string | null;
   siteBillRate: string | null;
+  /** Per-level site_rates card bill rate (lowest tier), resolved after the base query. */
+  cardBillRate: number | null;
   clientName: string | null;
   employeeRate: string | null;
   firstName: string | null;
@@ -180,7 +183,7 @@ async function loadApprovedEntries(range: AnalyticsRange): Promise<EntryRow[]> {
     lt(timeEntriesTable.clockInTime, range.end),
   ];
   if (range.clientId) where.push(eq(sitesTable.clientId, range.clientId));
-  return db
+  const rows = await db
     .select({
       employeeId: timeEntriesTable.employeeId,
       shiftId: timeEntriesTable.shiftId,
@@ -195,6 +198,8 @@ async function loadApprovedEntries(range: AnalyticsRange): Promise<EntryRow[]> {
       siteId: sitesTable.id,
       siteName: sitesTable.name,
       siteBillRate: sitesTable.defaultBillRate,
+      shiftLevel: shiftsTable.requiredLicenseLevel,
+      employeeLevel: employeesTable.siaLicenseLevel,
       clientName: clientsTable.name,
       employeeRate: employeesTable.hourlyRate,
       firstName: usersTable.firstName,
@@ -207,6 +212,41 @@ async function loadApprovedEntries(range: AnalyticsRange): Promise<EntryRow[]> {
     .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
     .leftJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
     .where(and(...where));
+
+  // Per-(site, level) rate-card bill rate, lowest tier per level — same
+  // fallback tier used by shift creation and invoicing, so the dashboard
+  // never disagrees with an invoice for an entry whose shift carries no
+  // billRate of its own. Batch-loaded once for every site in this range.
+  const siteIds = [...new Set(rows.map((r) => r.siteId).filter((id): id is string => id != null))];
+  const cardBillByKey = new Map<string, number>();
+  if (siteIds.length > 0) {
+    const tierByKey = new Map<string, number>();
+    const cardRows = await db
+      .select({
+        siteId: siteRatesTable.siteId,
+        licenseLevel: siteRatesTable.licenseLevel,
+        rateTier: siteRatesTable.rateTier,
+        billRate: siteRatesTable.billRate,
+      })
+      .from(siteRatesTable)
+      .where(inArray(siteRatesTable.siteId, siteIds));
+    for (const r of cardRows) {
+      const bill = parseFloat(String(r.billRate ?? "0"));
+      if (!(bill > 0)) continue;
+      const key = `${r.siteId}|${r.licenseLevel}`;
+      if (r.rateTier < (tierByKey.get(key) ?? Infinity)) {
+        tierByKey.set(key, r.rateTier);
+        cardBillByKey.set(key, bill);
+      }
+    }
+  }
+
+  return rows.map((r) => {
+    const level = r.shiftLevel ?? r.employeeLevel ?? null;
+    const cardBillRate =
+      r.siteId != null && level != null ? (cardBillByKey.get(`${r.siteId}|${level}`) ?? null) : null;
+    return { ...r, cardBillRate };
+  });
 }
 
 interface IncidentRow {
@@ -258,7 +298,9 @@ function priceEntry(e: EntryRow): { hours: number; revenue: number; laborCost: n
   if (!isFinite(hours) || hours <= 0) return { hours: 0, revenue: 0, laborCost: 0 };
   const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
   const siteBill = parseFloat(String(e.siteBillRate ?? "0"));
-  const billBase = shiftBill > 0 ? shiftBill : siteBill > 0 ? siteBill : 0;
+  // Per-level rate-card bill rate is tried before the flat legacy site
+  // default (mirrors invoiceSync's collectInvoicePeriodEntries).
+  const billBase = shiftBill > 0 ? shiftBill : (e.cardBillRate ?? 0) > 0 ? e.cardBillRate! : siteBill > 0 ? siteBill : 0;
   // Same shared resolver as the Payroll Board / payroll generation
   // (override > employee profile rate > shift rate; zero = not set), so the
   // dashboard's labor cost and a pay run never disagree.

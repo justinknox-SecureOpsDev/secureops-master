@@ -31,6 +31,7 @@ const FEATURE_META: Record<FeatureKey, { label: string; tier: string }> = {
   patrol:          { label: "Patrol Checkpoints",     tier: "Professional" },
   availability:    { label: "Officer Availability",   tier: "Professional" },
   officerShares:   { label: "Officer Share Links",    tier: "Enterprise" },
+  assistant:       { label: "Secure Ops AI Bot",       tier: "Enterprise" },
 };
 
 export function UpgradeRequired({ feature }: { feature: FeatureKey }) {
@@ -69,5 +70,35 @@ export function FeatureGuard({
   children: React.ReactNode;
 }) {
   if (!isFeatureEnabled(feature)) return <UpgradeRequired feature={feature} />;
+  return <>{children}</>;
+}
+
+/**
+ * Compact inline lock note for gating a SECTION of an otherwise-ungated page
+ * (e.g. one card on a site's detail page), where swapping the whole page for
+ * `UpgradeRequired` would hide unrelated, always-available content.
+ */
+export function FeatureLockedNote({ feature }: { feature: FeatureKey }) {
+  const meta = FEATURE_META[feature];
+  return (
+    <div className="flex items-start gap-2 rounded border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+      <Lock className="h-4 w-4 mt-0.5 shrink-0" />
+      <span>
+        {meta.label} isn’t included in your plan. Upgrade to the{" "}
+        <span className="font-semibold brand-gold">{meta.tier}</span> plan to unlock it.
+      </span>
+    </div>
+  );
+}
+
+/** Renders children when the feature is enabled, otherwise the compact inline note. */
+export function FeatureSectionGuard({
+  feature,
+  children,
+}: {
+  feature: FeatureKey;
+  children: React.ReactNode;
+}) {
+  if (!isFeatureEnabled(feature)) return <FeatureLockedNote feature={feature} />;
   return <>{children}</>;
 }

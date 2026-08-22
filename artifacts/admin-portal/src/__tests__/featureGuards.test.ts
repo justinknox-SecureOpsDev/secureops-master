@@ -3,20 +3,26 @@
  *
  * The server's `requireFeature` middleware is the authoritative gate (see
  * api-server `__tests__/featureGating.test.ts`). The admin portal only HIDES a
- * locked feature: a `feature`-annotated nav entry disappears from the sidebar,
- * the route it points to is wrapped in `<FeatureGuard feature="X">`, and the
- * generic table grids gate via the `TABLE_FEATURE` map. A deep-link / bookmark
- * to a gated surface then shows the upgrade card instead of empty/forbidden data.
+ * locked feature, via one of four mechanisms:
+ *   - a `feature`-annotated nav entry disappears from the sidebar
+ *   - the route it points to is wrapped in `<FeatureGuard feature="X">`
+ *   - a generic table grid gates via the `TABLE_FEATURE` map (whole table)
+ *   - a single `Field` in lib/tables.ts declares `feature: "X"` (one field
+ *     within an otherwise-ungated table), or a page/component inline-checks
+ *     `isFeatureEnabled("X")` to gate one section of an otherwise-ungated page
+ * A deep-link / bookmark to a gated surface then shows the upgrade card (or,
+ * for a field/section gate, a compact locked note) instead of empty/forbidden
+ * data.
  *
  * This test mirrors the server check on the UI side. It enumerates every
- * FeatureKey and asserts each one is either guarded by a real admin surface
- * (a FeatureGuard route or a TABLE_FEATURE entry) or is explicitly "absent"
- * (mobile-only). It also asserts that every `feature`-annotated nav entry
- * actually points at guarded content — so a new gated nav entry whose page
- * forgets the wrap fails here.
+ * FeatureKey and asserts each one is guarded by one of the four mechanisms
+ * above, or is explicitly "absent" (no admin-portal surface exists for it at
+ * all — mobile-only). It also asserts that every `feature`-annotated nav
+ * entry actually points at guarded content — so a new gated nav entry whose
+ * page forgets the wrap fails here.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -27,6 +33,7 @@ const SRC = path.resolve(HERE, "..");
 const APP_FILE = path.join(SRC, "App.tsx");
 const APPSHELL_FILE = path.join(SRC, "pages", "AppShell.tsx");
 const TABLEPAGE_FILE = path.join(SRC, "pages", "TablePage.tsx");
+const TABLES_FILE = path.join(SRC, "lib", "tables.ts");
 
 // Single source of truth: the shared feature-key registry. The test pins to it
 // directly (rather than regexing brand.ts, which only re-exports the type) so
@@ -66,12 +73,41 @@ function parseNavFeatures(): { href: string; feature: string }[] {
   }));
 }
 
+/** Field-level gates: `feature: "<key>"` on a Field descriptor in lib/tables.ts.
+ *  These hide a single field (grid column, edit-form field, Excel import)
+ *  within an otherwise-ungated table — e.g. employees.availability. */
+function parseFieldFeatures(): Set<string> {
+  const src = readFileSync(TABLES_FILE, "utf8");
+  return new Set([...src.matchAll(/feature:\s*"([^"]+)"/g)].map((m) => m[1]));
+}
+
+/** Inline `isFeatureEnabled("<key>")` checks gating a section of an otherwise
+ *  ungated page (e.g. the Patrol checkpoints card on a site's detail page).
+ *  Scans every page/component source file for a literal-string call. */
+function parseInlineFeatureChecks(): Set<string> {
+  const out = new Set<string>();
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.tsx?$/.test(entry.name)) continue;
+      const src = readFileSync(full, "utf8");
+      for (const m of src.matchAll(/isFeatureEnabled\("([^"]+)"\)/g)) out.add(m[1]);
+    }
+  };
+  walk(path.join(SRC, "pages"));
+  walk(path.join(SRC, "components"));
+  return out;
+}
+
 const ROUTE_GUARDS = parseRouteGuards();
 const TABLE_FEATURE = parseTableFeature();
 const NAV_FEATURES = parseNavFeatures();
+const FIELD_FEATURES = parseFieldFeatures();
+const INLINE_FEATURE_CHECKS = parseInlineFeatureChecks();
 
 /** Features that intentionally have no admin-portal surface (mobile-only). */
-const ADMIN_ABSENT = new Set(["patrol", "availability"]);
+const ADMIN_ABSENT = new Set<string>([]);
 
 /** Resolve the feature a given nav href is guarded by, or null. */
 function guardedFeatureForHref(href: string): string | null {
@@ -88,6 +124,8 @@ describe("admin portal UI feature-gate coverage", () => {
     const guarded = new Set<string>([
       ...Object.values(ROUTE_GUARDS),
       ...Object.values(TABLE_FEATURE),
+      ...FIELD_FEATURES,
+      ...INLINE_FEATURE_CHECKS,
     ]);
     for (const key of FEATURE_KEYS) {
       const isGuarded = guarded.has(key);
@@ -120,6 +158,8 @@ describe("admin portal UI feature-gate coverage", () => {
       ...Object.values(ROUTE_GUARDS),
       ...Object.values(TABLE_FEATURE),
       ...NAV_FEATURES.map((n) => n.feature),
+      ...FIELD_FEATURES,
+      ...INLINE_FEATURE_CHECKS,
     ];
     for (const key of used) {
       expect(
@@ -134,6 +174,8 @@ describe("admin portal UI feature-gate coverage", () => {
     const guarded = new Set<string>([
       ...Object.values(ROUTE_GUARDS),
       ...Object.values(TABLE_FEATURE),
+      ...FIELD_FEATURES,
+      ...INLINE_FEATURE_CHECKS,
     ]);
     for (const key of ADMIN_ABSENT) {
       expect(

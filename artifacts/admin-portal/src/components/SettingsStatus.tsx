@@ -18,6 +18,7 @@ export function LoadFailedNotice({
   hasLastKnown,
   onRetry,
   retrying,
+  message,
 }: {
   /** Plain-language name of the thing that couldn't be read, e.g. "branding". */
   label: string;
@@ -25,6 +26,14 @@ export function LoadFailedNotice({
   hasLastKnown: boolean;
   onRetry: () => void;
   retrying?: boolean;
+  /**
+   * Override the default "Couldn't load the {label} settings" lead sentence.
+   * For surfaces that aren't a settings page (e.g. a list, or a background
+   * refetch after a write rather than the initial read), the generic
+   * "settings" wording doesn't fit — pass the exact sentence instead. The
+   * `hasLastKnown` follow-up sentence is still appended automatically.
+   */
+  message?: string;
 }) {
   return (
     <div
@@ -32,7 +41,7 @@ export function LoadFailedNotice({
       className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
     >
       <span>
-        Couldn&apos;t load the {label} settings — the server didn&apos;t respond.
+        {message ?? `Couldn't load the ${label} settings — the server didn't respond.`}
         {hasLastKnown
           ? " Showing the last values this page read; they may be out of date."
           : " Nothing is shown below rather than the built-in defaults, which would look like an empty setting."}

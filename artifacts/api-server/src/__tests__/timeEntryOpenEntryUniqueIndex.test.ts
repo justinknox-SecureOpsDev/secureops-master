@@ -217,7 +217,7 @@ describe("time_entries one-open-entry-per-officer index", () => {
 });
 
 describe("clock-in paths translate the database conflict", () => {
-  it("manual clock-in answers 400 'Already clocked in' instead of a 500", async () => {
+  it("manual clock-in answers 400 with the already-clocked-in message instead of a 500", async () => {
     const dbErr = await captureDuplicateOpenEntryError();
     vi.spyOn(db, "transaction").mockRejectedValueOnce(dbErr as Error);
 
@@ -227,7 +227,7 @@ describe("clock-in paths translate the database conflict", () => {
       .send({ lat: SITE_LAT, lng: SITE_LNG });
 
     expect(res.status).toBe(400);
-    expect(res.body.message).toBe("Already clocked in");
+    expect(res.body.message).toMatch(/already have an open shift/i);
   });
 
   it("auto clock-in answers triggered:false / already_clocked_in instead of a 500", async () => {

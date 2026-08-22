@@ -15,6 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
+import { isFeatureEnabled } from "@/lib/brand";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
@@ -138,7 +139,7 @@ export function DataGrid({
   focusId?: string | null;
 }) {
   const visibleFields = useMemo(
-    () => descriptor.fields.filter((f) => !f.hiddenInGrid),
+    () => descriptor.fields.filter((f) => !f.hiddenInGrid && (!f.feature || isFeatureEnabled(f.feature))),
     [descriptor],
   );
 

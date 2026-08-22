@@ -1,0 +1,10 @@
+{
+  "name": "image-size",
+  "version": "2.0.3-secure.0",
+  "description": "Metro-compatible image-size adapter that rejects vulnerable JXL and ISO-BMFF parsers",
+  "main": "index.cjs",
+  "license": "MIT",
+  "dependencies": {
+    "image-size-upstream": "npm:image-size@2.0.2"
+  }
+}

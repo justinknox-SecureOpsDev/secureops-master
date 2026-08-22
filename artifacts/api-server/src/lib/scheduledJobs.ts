@@ -35,6 +35,12 @@ import { isSchedulerConfigured, fetchSchedulerDelta } from "./schedulerSync";
 import { getSiteManagerUserIds } from "./siteManagerAuthz";
 import { businessTimeZone, businessDateToUtc } from "./businessTime";
 import { getEligibleOfficerIds } from "./shiftEligibility";
+import {
+  LICENSE_REMINDER_TIER_DAYS,
+  COI_REMINDER_TIER_DAYS,
+  TRAINING_REMINDER_TIER_DAYS,
+} from "@workspace/license-reminder-schedule";
+import { isStuckOpenEntry } from "./stuckShift";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -81,7 +87,10 @@ const AUTO_CLOCKOUT_REMINDER_FOLLOW_UP_MINUTES = 10;
 const MAX_AUTO_CLOCKOUT_HOURS = 36;
 
 export const SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS = 12;
-const GEOFENCE_FRESH_MS = 15 * MIN_MS;
+// Exported so any other "is this entry actually abandoned" evaluation (e.g.
+// the Dispatch board's manual stuck-entry flag) applies the exact same
+// on-site exclusion as this sweep, instead of a second, driftable copy.
+export const GEOFENCE_FRESH_MS = 15 * MIN_MS;
 
 /**
  * Background maintenance jobs:
@@ -131,7 +140,12 @@ export async function sendLicenseExpiryReminders(): Promise<void> {
     // bookkeeping correctly: a license that has not yet been
     // reminded at the 30-day tier still gets the 30-day notice when
     // it lands inside the 14-day window.
-    const tiers = [60, 30, 14, 7];
+    //
+    // LICENSE_REMINDER_TIER_DAYS is the single source of truth for this
+    // schedule (see @workspace/license-reminder-schedule); the admin
+    // portal's License Renewals page derives its copy from the same
+    // constant so the two can never drift apart again.
+    const tiers: readonly number[] = LICENSE_REMINDER_TIER_DAYS;
     const today = new Date();
     const todayDateOnly = today.toISOString().slice(0, 10);
 
@@ -266,10 +280,14 @@ export async function sendLicenseExpiryReminders(): Promise<void> {
  * ACTIVE ADMIN team (subcontractors are vendors, not portal users) — every
  * due COI fans out a single push + email per admin so HR can chase an updated
  * certificate before coverage lapses.
+ *
+ * COI_REMINDER_TIER_DAYS (see @workspace/license-reminder-schedule) is the
+ * single source of truth for this schedule so any admin-portal copy
+ * describing it can never drift from what this job actually sends.
  */
 export async function sendCoiExpiryReminders(): Promise<void> {
   try {
-    const tiers = [60, 30, 14, 7];
+    const tiers: readonly number[] = COI_REMINDER_TIER_DAYS;
     const today = new Date();
     const todayDateOnly = today.toISOString().slice(0, 10);
 
@@ -1480,6 +1498,27 @@ export async function autoClockOutEndedShifts(): Promise<void> {
 }
 
 /**
+ * Automated admin alert for entries the Dispatch status board would flag
+ * "stuck" (see ./stuckShift for the shared policy this job and that board
+ * both use) — an open time entry `autoClockOutEndedShifts` above should
+ * normally have already closed, but didn't (geofence kept reporting
+ * "inside", or the site has auto-clock-out disabled). Today an admin only
+ * learns about that if they happen to open the Dispatch page; this job
+ * pages every active admin automatically so a genuinely stuck entry
+ * (blocking the officer's next clock-in) doesn't sit unnoticed for hours.
+ *
+ * Debounced via `time_entries.stuck_shift_notified_at`: the first alert
+ * fires as soon as an entry crosses the stuck threshold, then re-alerts at
+ * most once per STUCK_RENOTIFY_INTERVAL_MS while it remains open and
+ * stuck — enough to keep nudging admins about a multi-day abandoned entry
+ * without paging on every tick. The atomic UPDATE...RETURNING claim makes
+ * this safe under overlapping ticks / multiple instances, and a clock-out
+ * racing the tick (the WHERE re-checks `clock_out_time IS NULL`)
+ * suppresses the alert. A push failure rolls the stamp back so the next
+ * tick retries.
+ */
+const STUCK_RENOTIFY_INTERVAL_MS = 24 * HOUR_MS;
+/**
  * Forgot-to-clock-out reminders. For an automatic-close site, the first
  * nudge is scheduled from that site's current close delay rather than a
  * fixed offset after shift end. This job resolves the delay afresh on every
@@ -1611,15 +1650,19 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   const handles: NodeJS.Timeout[] = [];
 
   /**
-   * Training-certification expiry reminders. Same 60/30/14/7-day tiered
-   * pattern as license reminders (idempotent via lastReminderTier +
-   * lastReminderForExpiry, atomic UPDATE...RETURNING claim, rollback on
-   * total delivery failure). Skips rows with no expiryDate (perpetual
-   * certs like site-induction with no formal renewal).
+   * Training-certification expiry reminders. Same tiered pattern as license
+   * reminders (idempotent via lastReminderTier + lastReminderForExpiry,
+   * atomic UPDATE...RETURNING claim, rollback on total delivery failure).
+   * Skips rows with no expiryDate (perpetual certs like site-induction with
+   * no formal renewal).
+   *
+   * TRAINING_REMINDER_TIER_DAYS (see @workspace/license-reminder-schedule)
+   * is the single source of truth for this schedule so any admin-portal
+   * copy describing it can never drift from what this job actually sends.
    */
   async function sendTrainingExpiryReminders(): Promise<void> {
     try {
-      const tiers = [60, 30, 14, 7];
+      const tiers: readonly number[] = TRAINING_REMINDER_TIER_DAYS;
       const today = new Date();
       const todayDateOnly = today.toISOString().slice(0, 10);
 
@@ -2123,6 +2166,11 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // Auto clock-out officers >10m past shift end who aren't still on site
   // — every 5 minutes; atomic claim makes it idempotent per entry.
   schedule("auto-clock-out", autoClockOutEndedShifts, 5 * MIN_MS);
+  // Page admins about entries the Dispatch board would flag "stuck" —
+  // every 15 minutes. First alert fires promptly once an entry crosses the
+  // threshold; the stuck_shift_notified_at debounce re-alerts at most once
+  // per 24h after that until the entry is closed.
+  schedule("stuck-shift-alert", notifyStuckOpenShifts, 15 * MIN_MS);
   // Recover payroll rows stuck in 'processing' (a PNC rollback that itself
   // failed) — every 5 minutes; the 15-min age threshold cannot race a
   // legitimate in-flight submission.
@@ -2429,5 +2477,151 @@ export async function announceScheduledShifts(
     logger.info({ announced: due.length - eligibilityFailures.length, officers: officerShiftMap.size }, "[announce-shifts] completed");
   } catch (err) {
     logger.error({ err }, "[announce-shifts] job failed");
+  }
+}
+
+export async function notifyStuckOpenShifts(): Promise<void> {
+  try {
+    const now = Date.now();
+    const renotifyCutoff = new Date(now - STUCK_RENOTIFY_INTERVAL_MS);
+
+    // Same company-wide default the sweep above reads.
+    const [companySettings] = await db
+      .select({
+        autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes,
+      })
+      .from(platformCustomerConfigTable)
+      .where(eq(platformCustomerConfigTable.id, "singleton"))
+      .limit(1);
+    const companyDefaultDelayMinutes = companySettings?.autoClockOutDelayMinutes;
+
+    // Only consider entries due for a (first or repeat) notification —
+    // isStuckOpenEntry is re-checked per-row below since it depends on
+    // per-site policy that can't be expressed cleanly in SQL.
+    const rows = await db
+      .select({
+        entryId: timeEntriesTable.id,
+        employeeId: timeEntriesTable.employeeId,
+        clockInTime: timeEntriesTable.clockInTime,
+        geofenceState: timeEntriesTable.geofenceState,
+        stuckShiftNotifiedAt: timeEntriesTable.stuckShiftNotifiedAt,
+        shiftEndTime: shiftsTable.endTime,
+        lastLocationAt: usersTable.lastLocationAt,
+        siteName: sitesTable.name,
+        autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+        autoClockOutDelayMinutes: sitesTable.autoClockOutDelayMinutes,
+        officerFirstName: usersTable.firstName,
+        officerLastName: usersTable.lastName,
+      })
+      .from(timeEntriesTable)
+      .leftJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
+      .innerJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
+      // Same site-resolution precedence as autoClockOutEndedShifts (the
+      // entry's own siteId wins over its shift's) — the alert must key off
+      // the SAME policy the real sweep uses.
+      .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
+      .where(and(
+        isNull(timeEntriesTable.clockOutTime),
+        or(
+          isNull(timeEntriesTable.stuckShiftNotifiedAt),
+          lt(timeEntriesTable.stuckShiftNotifiedAt, renotifyCutoff),
+        ),
+      ));
+
+    if (rows.length === 0) return;
+
+    // Cache the active-admin list once per tick — every alert in this tick
+    // goes to the same audience.
+    let adminIdsCache: string[] | null = null;
+    const activeAdminIds = async (): Promise<string[]> => {
+      if (adminIdsCache) return adminIdsCache;
+      const admins = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(and(eq(usersTable.role, "admin"), eq(usersTable.status, "active")));
+      adminIdsCache = admins.map((a) => a.id);
+      return adminIdsCache;
+    };
+
+    let totalSent = 0;
+    for (const r of rows) {
+      const stuck = isStuckOpenEntry({
+        now,
+        clockInTime: r.clockInTime,
+        shiftEndTime: r.shiftEndTime ?? null,
+        autoClockOutEnabled: r.autoClockOutEnabled,
+        autoClockOutDelayMinutes: r.autoClockOutDelayMinutes,
+        companyDefaultDelayMinutes,
+        geofenceState: r.geofenceState,
+        lastLocationAt: r.lastLocationAt,
+      });
+      if (!stuck) continue;
+
+      // Atomically claim this entry so overlapping ticks / a second
+      // instance can never double-page, and a clock-out racing the tick
+      // suppresses the alert.
+      const claimWhere = r.stuckShiftNotifiedAt == null
+        ? isNull(timeEntriesTable.stuckShiftNotifiedAt)
+        : lt(timeEntriesTable.stuckShiftNotifiedAt, renotifyCutoff);
+      const claimed = await db
+        .update(timeEntriesTable)
+        .set({ stuckShiftNotifiedAt: new Date() })
+        .where(and(
+          eq(timeEntriesTable.id, r.entryId),
+          isNull(timeEntriesTable.clockOutTime),
+          claimWhere,
+        ))
+        .returning({ id: timeEntriesTable.id });
+      if (claimed.length === 0) continue; // lost the race — another tick/instance got it
+
+      const adminIds = await activeAdminIds();
+      if (adminIds.length === 0) {
+        // Nobody to notify — the stamp is already claimed above so we don't
+        // re-scan and re-attempt on every future tick.
+        continue;
+      }
+
+      const officerName = [r.officerFirstName, r.officerLastName].filter(Boolean).join(" ") || "An officer";
+      const where = r.siteName ? ` at ${r.siteName}` : "";
+      const hoursOpen = Math.round(((now - r.clockInTime.getTime()) / HOUR_MS) * 10) / 10;
+      const pushBody = `${officerName} has been clocked in${where} for ${hoursOpen}h — auto clock-out didn't catch it. Close it from Dispatch so their next clock-in isn't blocked.`;
+      const smsBody = `SecureOps: ${officerName}'s shift${where} has been open ${hoursOpen}h and appears stuck. Please review/close it in Dispatch.`;
+
+      let pushOk = false;
+      try {
+        await sendPushToUsers(adminIds, {
+          title: "⚠️ Stuck open shift",
+          body: pushBody,
+          data: { type: "stuck_open_shift", timeEntryId: r.entryId, employeeId: r.employeeId },
+        });
+        pushOk = true;
+      } catch (err) {
+        logger.warn({ err, timeEntryId: r.entryId }, "[stuck-shift-alert] push send failed");
+      }
+
+      try {
+        await sendSmsToUsers(adminIds, smsBody);
+      } catch (err) {
+        logger.warn({ err, timeEntryId: r.entryId }, "[stuck-shift-alert] sms send failed");
+      }
+
+      if (!pushOk) {
+        // Roll back the stamp so the next tick retries (push is the primary
+        // channel; SMS-only delivery still rolls back to preserve retries).
+        await db
+          .update(timeEntriesTable)
+          .set({ stuckShiftNotifiedAt: r.stuckShiftNotifiedAt ?? null })
+          .where(eq(timeEntriesTable.id, r.entryId))
+          .catch(() => {/* swallow */});
+        continue;
+      }
+      totalSent += 1;
+    }
+
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Paged admins for stuck open shifts");
+    }
+  } catch (err) {
+    logger.error({ err }, "[stuck-shift-alert] job failed");
   }
 }

@@ -31,9 +31,20 @@
  *   - TENANT ENVIRONMENT — the fork carries its OWN org code (not the master
  *     template's), no `ORG_DIRECTORY`, and no `EXPO_TOKEN` (a fork must never be
  *     able to ship phone-app updates to the whole fleet).
+ *   - PRE-PUBLISH DATA — whether the connected database already holds rows that
+ *     violate a uniqueness rule declared in `lib/db/src/schema/`. Publishing a
+ *     new uniqueness rule over conflicting rows is the migration shape that
+ *     previously resolved as `TRUNCATE ... CASCADE` and destroyed four live
+ *     tables, so a violation here is a hard failure. Every statement it runs is
+ *     a read-only SELECT — see `check-unique-preconditions.ts`.
  *
  * Usage:
  *   pnpm --filter @workspace/scripts run check-fork-integrity
+ *
+ *   The data check runs against whichever database the environment points at:
+ *   `OVERRIDE_DATABASE_URL` when set, otherwise `DATABASE_URL`. Run it bare for
+ *   the tenant's dev database, and with `OVERRIDE_DATABASE_URL=<prod connection
+ *   string>` to clear their PRODUCTION database before republishing.
  *
  * Exit code 0 — every REQUIRED check passed (RECOMMENDED gaps only warn).
  * Exit code 1 — at least one REQUIRED check failed.
@@ -42,6 +53,17 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pg from "pg";
+import * as schema from "@workspace/db/schema";
+import type { CheckResult, Severity } from "./check-result.js";
+import {
+  UNIQUE_VIOLATION_ADVICE,
+  checkUniquePreconditions,
+  collectUniqueRulesFrom,
+  evaluateUniqueData,
+  loadExistingTables,
+  type UniqueDataFacts,
+} from "./check-unique-preconditions.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,17 +89,7 @@ export const FORBIDDEN_ENV_VARS = ["ORG_DIRECTORY", "EXPO_TOKEN"] as const;
 // Result model (mirrors the reporting style of check-tenant-config.ts)
 // ---------------------------------------------------------------------------
 
-export type Severity = "required" | "recommended";
-
-export interface CheckResult {
-  area: string;
-  name: string;
-  severity: Severity;
-  ok: boolean;
-  detail?: string;
-  /** Supporting lines printed under the check (e.g. every differing path). */
-  items?: string[];
-}
+export type { CheckResult, Severity } from "./check-result.js";
 
 /** State of the fetched master ref in this checkout. */
 export interface UpstreamState {
@@ -121,6 +133,12 @@ export interface ForkFacts {
   divergentPaths: string[] | null;
   conflicts: ConflictHit[];
   env: ForkEnv;
+  /**
+   * Uniqueness preconditions read from the connected database, or undefined
+   * when the database was not consulted (unit tests of the git/env logic). The
+   * CLI always collects it.
+   */
+  uniqueData?: UniqueDataFacts;
 }
 
 export interface ForkVerdict {
@@ -278,6 +296,13 @@ export function evaluateFork(facts: ForkFacts): ForkVerdict {
           }`
         : undefined,
     });
+  }
+
+  // ---- Pre-publish data ----------------------------------------------------
+  // Only evaluated when the database was actually consulted; the CLI always
+  // consults it, so a real run always reports this area.
+  if (facts.uniqueData) {
+    results.push(...evaluateUniqueData(facts.uniqueData));
   }
 
   return { results, allowedDifferences, masterRev };
@@ -462,6 +487,50 @@ export function parseConflictGrep(stdout: string): ConflictHit[] {
   return hits;
 }
 
+/**
+ * Read the uniqueness preconditions from whichever database this repl points
+ * at. `OVERRIDE_DATABASE_URL` wins so an operator can aim the same command at
+ * the tenant's PRODUCTION database without touching their dev environment;
+ * every statement issued is a read-only SELECT.
+ */
+export async function collectUniqueDataFacts(
+  procEnv: Record<string, string | undefined> = process.env,
+): Promise<UniqueDataFacts> {
+  const override = procEnv.OVERRIDE_DATABASE_URL?.trim();
+  const source = override ? "OVERRIDE_DATABASE_URL" : "DATABASE_URL";
+  const connectionString = override || procEnv.DATABASE_URL?.trim();
+  if (!connectionString) {
+    return {
+      source,
+      error:
+        "neither OVERRIDE_DATABASE_URL nor DATABASE_URL is set, so the data " +
+        "this publish would migrate could not be checked",
+      preconditions: [],
+    };
+  }
+
+  const rules = collectUniqueRulesFrom(schema as Record<string, unknown>);
+  const client = new pg.Client({ connectionString });
+  try {
+    await client.connect();
+    const existingTables = await loadExistingTables(client);
+    const preconditions = await checkUniquePreconditions(
+      client,
+      rules,
+      existingTables,
+    );
+    return { source, error: null, preconditions };
+  } catch (err) {
+    return {
+      source,
+      error: `could not read the database: ${(err as Error).message}`,
+      preconditions: [],
+    };
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 export function collectForkFacts(repoRoot: string): ForkFacts {
   const upstream = readUpstreamState(repoRoot);
   const masterRev = resolveMasterRev(upstream);
@@ -511,7 +580,19 @@ export function printVerdict(verdict: ForkVerdict): Summary {
       ".",
   );
 
-  if (summary.exitCode === 1) {
+  // The data failure has its own remediation — it is not a code-drift problem
+  // and the "take master's version wholesale" advice would not fix it.
+  const dataFailed = summary.failedRequired.some(
+    (r) => r.area === "Pre-publish data",
+  );
+  if (dataFailed) {
+    console.log(`\n${UNIQUE_VIOLATION_ADVICE}`);
+  }
+
+  const codeFailed = summary.failedRequired.some(
+    (r) => r.area !== "Pre-publish data",
+  );
+  if (codeFailed) {
     console.log(
       "\nThis fork is NOT a verified copy of the master revision — do NOT republish it.\n" +
         "A customer fork is read-only downstream code: no agent tasks, no local edits.\n" +
@@ -519,6 +600,11 @@ export function printVerdict(verdict: ForkVerdict): Summary {
         '"Recovering a fork that has already drifted" in\n' +
         "docs/update-existing-customer-runbook.md — take master's version of shared code\n" +
         "wholesale and keep only the customer's .replit env blocks by hand.",
+    );
+  } else if (summary.exitCode === 1) {
+    console.log(
+      "\nThis fork's CODE is a verified copy of master, but its DATA is not safe to\n" +
+        "publish yet — do NOT republish until the failure above is cleared.",
     );
   } else {
     console.log(
@@ -537,10 +623,12 @@ function repoRootFromHere(): string {
   return path.resolve(here, "../..");
 }
 
-export function main(): void {
+export async function main(): Promise<void> {
   const repoRoot = repoRootFromHere();
   console.log(`Fork-integrity check — ${repoRoot}`);
-  const verdict = evaluateFork(collectForkFacts(repoRoot));
+  const facts = collectForkFacts(repoRoot);
+  facts.uniqueData = await collectUniqueDataFacts();
+  const verdict = evaluateFork(facts);
   const summary = printVerdict(verdict);
   if (summary.exitCode !== 0) process.exit(summary.exitCode);
 }
@@ -561,10 +649,8 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  try {
-    main();
-  } catch (err) {
+  main().catch((err: unknown) => {
     console.error("[check-fork-integrity] crashed:", err);
     process.exit(1);
-  }
+  });
 }

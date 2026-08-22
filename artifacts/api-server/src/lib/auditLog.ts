@@ -1,6 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
 import { db, auditLogsTable } from "@workspace/db";
 import { logger } from "./logger";
+import {
+  ASSISTANT_ORIGIN_HEADER,
+  ASSISTANT_TOKEN_HEADER,
+  isTrustedAssistantOrigin,
+} from "./assistant/internalDispatch";
 
 /**
  * Audit log middleware.
@@ -187,6 +192,17 @@ export function auditLogMiddleware(req: Request, res: Response, next: NextFuncti
   const ip = req.ip ?? null;
   const userAgent = req.headers["user-agent"] ?? null;
 
+  // Writes the in-portal assistant performed on the user's behalf are still
+  // the user's writes — same actor, same route, same authorisation — but the
+  // log should say so. The marker is only trusted when the request also
+  // carries this process's internal dispatch token, so an outside caller
+  // cannot mislabel their own writes as assistant-initiated.
+  const assistantOrigin =
+    isTrustedAssistantOrigin(req.headers[ASSISTANT_TOKEN_HEADER]) &&
+    typeof req.headers[ASSISTANT_ORIGIN_HEADER] === "string"
+      ? (req.headers[ASSISTANT_ORIGIN_HEADER] as string).slice(0, 200)
+      : null;
+
   res.on("finish", () => {
     // Only log successful writes — 4xx/5xx are noise here and would
     // double-count rate-limit/validation failures we already log.
@@ -219,7 +235,11 @@ export function auditLogMiddleware(req: Request, res: Response, next: NextFuncti
           userAgent: typeof userAgent === "string" ? userAgent.slice(0, 500) : null,
           before: null,
           after: bodySnapshot ?? null,
-          metadata: (res.locals?.["auditMetadata"] as Record<string, unknown> | undefined) ?? null,
+          metadata: (() => {
+            const base = (res.locals?.["auditMetadata"] as Record<string, unknown> | undefined) ?? null;
+            if (!assistantOrigin) return base;
+            return { ...(base ?? {}), assistantInitiated: true, assistantOrigin };
+          })(),
         });
       } catch (err) {
         logger.warn({ err, path: routerPath, method: req.method }, "[audit] failed to persist log entry");

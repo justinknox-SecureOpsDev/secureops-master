@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { errorText, writeWasRefused, type SettingsMessage } from "@/lib/settingsStatus";
+import { ControlMessage } from "@/components/SettingsStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -456,6 +458,10 @@ function StandardFieldsManager() {
   const [busy, setBusy] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<FieldDraft>({ label: "", helpText: "", required: false, hidden: false });
+  // Per-field result, rendered on the row that produced it — mirrors
+  // Permissions.tsx so a failed confirming reload can't make a saved edit
+  // look undone (see settingsStatus.ts).
+  const [messages, setMessages] = useState<Record<string, SettingsMessage | undefined>>({});
 
   async function load() {
     setLoading(true);
@@ -474,15 +480,25 @@ function StandardFieldsManager() {
     void load();
   }, []);
 
+  /** Confirming re-read used after a write. Never throws, never clears `fields` on failure. */
+  async function reloadSilently(): Promise<EffectiveField[] | null> {
+    try {
+      return await api<EffectiveField[]>("/admin/application-fields");
+    } catch {
+      return null;
+    }
+  }
+
   async function saveEdit(key: string) {
     if (!draft.label.trim()) {
       setError("Field label cannot be empty.");
       return;
     }
+    setMessages((m) => ({ ...m, [key]: undefined }));
     setBusy(true);
     setError(null);
     try {
-      await api(`/admin/application-fields/${key}`, {
+      const reply = await api<EffectiveField>(`/admin/application-fields/${key}`, {
         method: "PATCH",
         body: {
           labelOverride: draft.label.trim(),
@@ -491,23 +507,78 @@ function StandardFieldsManager() {
           hidden: draft.hidden,
         },
       });
+      // The write reply is authoritative: apply it *before* the confirming
+      // reload, so a reload that fails can never redraw a saved edit as if
+      // it never happened.
+      setFields((prev) => prev.map((f) => (f.key === reply.key ? reply : f)));
       setEditingKey(null);
-      await load();
+      const fresh = await reloadSilently();
+      if (fresh) {
+        setFields(fresh);
+      } else {
+        setMessages((m) => ({
+          ...m,
+          [key]: { kind: "warn", text: "Saved — this page couldn't refresh the list, so it's showing what was just saved." },
+        }));
+      }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
+      if (writeWasRefused(e)) {
+        // The route refused it: nothing was written.
+        setMessages((m) => ({ ...m, [key]: { kind: "error", text: `Not saved — ${errorText(e)}` } }));
+        return;
+      }
+      // 5xx / no answer: unknown outcome. Re-read rather than guess, but
+      // never wipe the list just because this one write's answer was lost.
+      const fresh = await reloadSilently();
+      if (fresh) setFields(fresh);
+      setMessages((m) => ({
+        ...m,
+        [key]: {
+          kind: "error",
+          text: fresh
+            ? `Couldn't confirm the change (${errorText(e)}). This field now shows what is stored.`
+            : `Couldn't confirm the change (${errorText(e)}) and this page couldn't re-read the fields. Reload the page to see what is stored.`,
+        },
+      }));
     } finally {
       setBusy(false);
     }
   }
 
   async function toggleHidden(f: EffectiveField) {
+    setMessages((m) => ({ ...m, [f.key]: undefined }));
     setBusy(true);
     setError(null);
     try {
-      await api(`/admin/application-fields/${f.key}`, { method: "PATCH", body: { hidden: !f.hidden } });
-      await load();
+      const reply = await api<EffectiveField>(`/admin/application-fields/${f.key}`, { method: "PATCH", body: { hidden: !f.hidden } });
+      // Same authoritative-response rule as saveEdit: commit the write reply
+      // before the confirming reload.
+      setFields((prev) => prev.map((x) => (x.key === reply.key ? reply : x)));
+      const fresh = await reloadSilently();
+      if (fresh) {
+        setFields(fresh);
+      } else {
+        setMessages((m) => ({
+          ...m,
+          [f.key]: { kind: "warn", text: "Saved — this page couldn't refresh the list, so it's showing what was just saved." },
+        }));
+      }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
+      if (writeWasRefused(e)) {
+        setMessages((m) => ({ ...m, [f.key]: { kind: "error", text: `Not saved — ${errorText(e)}` } }));
+        return;
+      }
+      const fresh = await reloadSilently();
+      if (fresh) setFields(fresh);
+      setMessages((m) => ({
+        ...m,
+        [f.key]: {
+          kind: "error",
+          text: fresh
+            ? `Couldn't confirm the change (${errorText(e)}). This field now shows what is stored.`
+            : `Couldn't confirm the change (${errorText(e)}) and this page couldn't re-read the fields. Reload the page to see what is stored.`,
+        },
+      }));
     } finally {
       setBusy(false);
     }
@@ -660,12 +731,18 @@ function StandardFieldsManager() {
                                 setEditingKey(f.key);
                                 setDraft(fieldDraftFrom(f));
                                 setError(null);
+                                setMessages((m) => ({ ...m, [f.key]: undefined }));
                               }}
                               disabled={busy}
                             >
                               <Pencil className="w-4 h-4" />
                             </Button>
                           </div>
+                        </div>
+                      )}
+                      {messages[f.key] && (
+                        <div className="px-3 pb-3">
+                          <ControlMessage message={messages[f.key] ?? null} />
                         </div>
                       )}
                     </li>

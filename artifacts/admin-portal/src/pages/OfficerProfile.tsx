@@ -5,6 +5,8 @@ import { Link, useRoute, useLocation } from "wouter";
 import { api } from "@/lib/api";
 import { openSignedObject } from "@/lib/upload";
 import { useAuth } from "@/lib/auth";
+import { isFeatureEnabled } from "@/lib/brand";
+import { FeatureLockedNote } from "@/components/FeatureGate";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1099,10 +1101,14 @@ export default function OfficerProfilePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div>
-                <div className="text-[11px] uppercase opacity-60">Availability</div>
-                <div className="text-sm">{renderAvailability(officer.data.availability)}</div>
-              </div>
+              {isFeatureEnabled("availability") ? (
+                <div>
+                  <div className="text-[11px] uppercase opacity-60">Availability</div>
+                  <div className="text-sm">{renderAvailability(officer.data.availability)}</div>
+                </div>
+              ) : (
+                <FeatureLockedNote feature="availability" />
+              )}
               <div>
                 <div className="text-[11px] uppercase opacity-60">Acknowledgements</div>
                 <div className="text-sm">{renderAcks(officer.data.acknowledgements)}</div>

@@ -7,7 +7,7 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { requireAdmin, requireStaff } from "../middlewares/auth";
+import { requireAdmin, requireStaff, requireSubcontractor } from "../middlewares/auth";
 import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
 import { db, employeesTable, incidentsTable, licenseRenewalRequestsTable, protectionPersonsTable, shiftAssignmentsTable } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -360,6 +360,62 @@ router.post(
       ownerKey: req.user!.userId,
     }),
 );
+
+/**
+ * POST /subcontractor-portal/uploads/request-url
+ *
+ * Presigned-upload endpoint for the subcontractor self-service portal
+ * (W-9 and Certificate of Insurance documents). `requireStaff` deliberately
+ * excludes the `subcontractor` role (it is an external vendor contact, not
+ * staff — see requireStaff docs), so it needs its own route rather than
+ * reusing POST /storage/uploads/request-url above.
+ */
+router.post(
+  "/subcontractor-portal/uploads/request-url",
+  uploadUrlLimiter,
+  requireSubcontractor,
+  (req: Request, res: Response) =>
+    handleUploadUrlRequest(req, res, {
+      maxBytes: MAX_UPLOAD_BYTES,
+      ownerKey: req.user!.userId,
+    }),
+);
+
+/**
+ * GET /subcontractor-portal/storage/sign?path=/objects/...
+ *
+ * Self-serve signed download URL for the authenticated subcontractor.
+ * Every presigned upload URL this portal mints is bound to the caller's own
+ * user ID at mint time (`ownerKey` above), and the object-storage service
+ * always writes under `/objects/uploads/u/<userId>/...` for a bound upload —
+ * so a path under the caller's own prefix can only ever be a file THEY
+ * uploaded. A simple prefix check is therefore sufficient ownership proof
+ * here; there is no legacy pre-binding data to defend against the way the
+ * older employee-document endpoint (`/me/storage/sign`) does.
+ */
+router.get("/subcontractor-portal/storage/sign", requireSubcontractor, async (req: Request, res: Response) => {
+  const path = (req.query.path as string | undefined)?.trim();
+  if (!path || !path.startsWith("/objects/")) {
+    res.status(400).json({ error: "Bad Request", message: "path query param required" });
+    return;
+  }
+  const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
+  if (!path.startsWith(ownedPrefix)) {
+    res.status(403).json({ error: "Forbidden", message: "You do not own this object" });
+    return;
+  }
+  try {
+    const url = await objectStorageService.getSignedDownloadURL(path);
+    res.json({ url });
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "Object not found" });
+      return;
+    }
+    req.log.error({ err }, "Error signing subcontractor-portal download URL");
+    res.status(500).json({ error: "Internal Server Error", message: "Failed to sign URL" });
+  }
+});
 
 /**
  * POST /storage/uploads/application-file

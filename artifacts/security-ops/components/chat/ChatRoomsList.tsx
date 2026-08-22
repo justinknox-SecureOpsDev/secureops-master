@@ -6,11 +6,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import { useBrand } from "@/hooks/useFeatures";
+import { useBrand, useFeature } from "@/hooks/useFeatures";
 import { apiRequest } from "@/utils/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
 import { formatDistanceToNow } from "date-fns";
+import { shouldShowAiBotEntry } from "./chatVisibility";
 
 interface ChatRoom {
   id: string;
@@ -48,11 +49,21 @@ interface Props {
    * we would pad a second time and push the list down by a dead gap.
    */
   topInset?: boolean;
+  /**
+   * Opens the dedicated Secure Ops AI Bot conversation screen. The bot is a
+   * private, one-on-one surface reached from here — it never becomes a member
+   * of a shared chat_rooms/chat_messages thread — so it renders as its own
+   * fixed row above the room tabs, not as an entry inside `rooms`. Omit to
+   * hide the entry entirely (e.g. a standalone usage with no bot route wired
+   * up yet).
+   */
+  onOpenAiBot?: () => void;
 }
 
-export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0, topInset = true }: Props) {
+export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0, topInset = true, onOpenAiBot }: Props) {
   const colors = useColors();
   const brand = useBrand();
+  const assistantEnabled = useFeature("assistant");
   const { user } = useAuth();
   const { unreadByRoom, markRoomRead, refreshUnread } = useChat();
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -212,6 +223,35 @@ export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0, topInset
           {brand.companyName}
         </Text>
       </View>
+
+      {shouldShowAiBotEntry(assistantEnabled, onOpenAiBot) && (
+        <TouchableOpacity
+          style={[s.aiBotCard, { backgroundColor: colors.card, borderColor: colors.primary + "55" }]}
+          onPress={onOpenAiBot}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Secure Ops AI Bot. New. Ask a question or get things done."
+          accessibilityHint="Opens a private conversation with the AI bot"
+        >
+          <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
+            <Feather name="zap" size={18} color={colors.primary} />
+          </View>
+          <View style={s.roomInfo}>
+            <View style={s.roomNameRow}>
+              <Text style={[s.roomName, { color: colors.foreground }]} numberOfLines={1}>
+                Secure Ops AI Bot
+              </Text>
+              <View style={[s.newBadge, { borderColor: colors.primary }]}>
+                <Text style={[s.newBadgeText, { color: colors.primary }]}>NEW</Text>
+              </View>
+            </View>
+            <Text style={[s.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
+              Ask a question, or get something done
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      )}
 
       <View style={[s.tabs, { borderBottomColor: colors.border }]} accessibilityRole="tablist">
         {(["channels", "direct"] as const).map((k) => (
@@ -445,6 +485,13 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   tabs: { flexDirection: "row", borderBottomWidth: 1, marginBottom: 8 },
   tab: { flex: 1, paddingVertical: 12, alignItems: "center", borderBottomWidth: 2, borderBottomColor: "transparent" },
   tabText: { fontSize: 14, fontWeight: "600" },
+  aiBotCard: {
+    flexDirection: "row", alignItems: "center", padding: 14,
+    borderRadius: 12, borderWidth: 1, gap: 12,
+    marginHorizontal: 16, marginBottom: 12,
+  },
+  newBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 },
+  newBadgeText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
   newRoomRow: {
     flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 12,
     borderRadius: 10, borderWidth: 1, paddingHorizontal: 12,

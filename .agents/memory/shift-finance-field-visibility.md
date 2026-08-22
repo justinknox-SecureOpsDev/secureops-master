@@ -35,10 +35,20 @@ Officers seeing it is an information-disclosure defect.
 
 ## Mutation responses are a second, easily-missed surface
 
-The sanitizer only covers what you pass through it, and it only strips `payRate`/
-`billRate` — which are **joined shift columns, not `time_entries` columns**. So running a
-raw `time_entries` row through `stripTimeEntryBillRateForRole` is a no-op that still
-returns `payRateOverride` (a pay value) plus last-editor provenance.
+The sanitizer only covers what you pass through it, and (before Task #785) it only
+stripped `payRate`/`billRate` — which are **joined shift columns, not `time_entries`
+columns** — so running a raw `time_entries` row through `stripTimeEntryBillRateForRole`
+was a no-op that still returned `payRateOverride` (a pay value). Fixed: the function now
+also strips `payRateOverride` (admin/dispatcher-only, same class as billRate) as defense
+in depth, even though the one wired-up caller already renamed it to `_payRateOverride`
+before reaching the sanitizer. Last-editor provenance fields are NOT stripped by either
+sanitizer — audit that separately if widening a mutation route's response.
+
+A schema-drift test (`financeVisibility.test.ts`) now enumerates every `numeric` column
+on `shiftsTable`/`timeEntriesTable` via `getTableColumns` and fails if a new one isn't
+explicitly categorized as non-money or proven (by actually invoking the real strip
+function) to be stripped for the client role — mirrors the `DASHBOARD_FINANCE_FIELDS`
+schema-drift test on the owner axis. Add new money columns to that test's allowlists.
 
 **The trap:** a route ends with `res.json({ ...updated })` spread straight from
 `.returning()`. That is a different, wider shape than the list route's `baseSelect`

@@ -509,6 +509,26 @@ export function requireClient(req: Request, res: Response, next: NextFunction): 
 }
 
 /**
+ * Gate routes to authenticated users with role="subcontractor" only.
+ *
+ * Subcontractor portal users are external vendor contacts (not staff) who
+ * self-manage their own company profile, tax/W-9, certificate(s) of
+ * insurance, and banking details. Every endpoint gated here must ALSO scope
+ * data access to the caller's own `subcontractorId` (set once they submit
+ * their first profile — see routes/subcontractorPortal.ts) so one vendor can
+ * never read or write another vendor's record.
+ */
+export function requireSubcontractor(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    if (req.user?.role !== "subcontractor") {
+      res.status(403).json({ error: "Forbidden", message: "Subcontractor access required" });
+      return;
+    }
+    next();
+  });
+}
+
+/**
  * Gate routes to internal staff (admin, dispatcher, employee, site_manager) —
  * i.e. any authenticated user EXCEPT external `client` portal contacts. Use
  * for endpoints that expose internal operational data (e.g. the officer

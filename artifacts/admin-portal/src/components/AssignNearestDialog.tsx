@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, isStillProcessing, STILL_SAVING_MESSAGE } from "@/lib/api";
+import { useIdempotentIntent } from "@/lib/idempotentIntent";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
@@ -53,14 +54,33 @@ export function AssignNearestDialog({
     }),
     onSuccess: (data) => setResult(data),
   });
+  // Rostering this officer onto this shift is one intent however many times
+  // the button is pressed: a second press reuses the same idempotency key, so
+  // the server replays the first assignment instead of answering "already
+  // assigned" (which reads as a refusal) or creating a second row.
+  const intent = useIdempotentIntent();
   const assign = useMutation({
     mutationFn: ({ employeeId, overrideLicense }: { employeeId: string; overrideLicense: boolean }) =>
-      api(`/shifts/${shiftId}/assignments`, {
-        method: "POST",
-        body: { employeeId, status: "accepted", overrideLicense },
-      }),
+      intent.run(`assign:${shiftId}:${employeeId}`, (idempotencyKey) =>
+        api(`/shifts/${shiftId}/assignments`, {
+          method: "POST",
+          idempotencyKey,
+          body: { employeeId, status: "accepted", overrideLicense },
+        }),
+      ),
     onSuccess: () => { onAssigned(); onOpenChange(false); },
+    onError: (e) => {
+      // Still-processing means the assignment is mid-save, not refused. Pull
+      // the candidate list again: if it landed while we were waiting, this
+      // officer comes back marked as already assigned, which is the answer.
+      if (isStillProcessing(e)) dryRun.mutate(override);
+    },
   });
+  // Shown after `api()` has spent its joining budget without the server
+  // confirming. Not a failure — the write may still land — so the buttons stay
+  // usable (pressing again reuses the key and can only replay, never duplicate)
+  // and no "could not assign" is claimed over a write that is committing.
+  const stillSaving = assign.isError && isStillProcessing(assign.error);
 
   useEffect(() => {
     if (open) { setResult(null); setOverride(false); setSearch(""); assign.reset(); dryRun.mutate(false); }
@@ -172,7 +192,7 @@ export function AssignNearestDialog({
                       disabled={disabled || assign.isPending}
                       onClick={() => assign.mutate({ employeeId: c.userId, overrideLicense: override })}
                     >
-                      Assign
+                      {assign.isPending ? "Saving…" : "Assign"}
                     </Button>
                   </div>
                 </div>
@@ -184,7 +204,12 @@ export function AssignNearestDialog({
               Showing nearest 8 of {result.candidates.length}. Search to find a specific officer.
             </div>
           )}
-          {assign.isError && (
+          {stillSaving && (
+            <div role="status" className="text-xs text-muted-foreground">
+              {STILL_SAVING_MESSAGE}
+            </div>
+          )}
+          {assign.isError && !stillSaving && (
             <div className="text-xs text-red-700">
               {assign.error instanceof Error ? assign.error.message : "Could not assign officer."}
             </div>

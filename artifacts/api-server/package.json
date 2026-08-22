@@ -17,6 +17,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/feature-keys": "workspace:*",
     "@workspace/legal-docs": "workspace:*",
+    "@workspace/license-reminder-schedule": "workspace:*",
     "@workspace/permission-keys": "workspace:*",
     "@workspace/screen-names": "workspace:*",
     "bcryptjs": "^3.0.3",
@@ -37,7 +38,7 @@
     "pino-http": "^10",
     "qrcode": "^1.5.4",
     "resend": "^6.12.4",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.3",
     "stripe": "^22.2.0",
     "ws": "^8.20.1",
     "zod": "catalog:"

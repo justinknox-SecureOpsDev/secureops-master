@@ -58,8 +58,11 @@ function StatusPill({ status }: { status: string }) {
 export function InvoiceTransactionList() {
   const { user } = useAuth();
   // The per-record admin grid (the existing single-record screen) is
-  // requireAdmin server-side, so only offer the deep link to a role that can
-  // actually open it.
+  // requireAdmin server-side. An admin keeps using that deep link; anyone
+  // else who can see this list at all only got here via finance.transactions
+  // (see requireCompanyOwnerOrPermission on GET /invoices), which also gates
+  // GET/PUT /invoices/:id — so they open the same record on the narrower
+  // read/edit detail page instead of the admin grid.
   //
   // Deliberately NO invoice-PDF action here: the generated PDF carries
   // subtotal, tax, processing fees, total and every line item — exactly the
@@ -67,7 +70,7 @@ export function InvoiceTransactionList() {
   // that hand out every invoice id would make that detail one click away and
   // defeat the sanitization. Any future download for this role needs its own
   // sanitized document and authorization decision, not this button.
-  const canOpenRecord = user?.role === "admin";
+  const isAdmin = user?.role === "admin";
 
   const [rows, setRows] = useState<InvoiceListRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,23 +127,21 @@ export function InvoiceTransactionList() {
     { id: "status", header: "Status", mobile: "meta", cell: (r) => <StatusPill status={r.status} /> },
     { id: "due", header: "Due", cell: (r) => fmtDate(r.dueDate) },
     { id: "paid", header: "Paid", cell: (r) => fmtDate(r.paidAt) },
-    ...(canOpenRecord
-      ? [{
-          id: "actions",
-          header: "",
-          align: "right" as const,
-          mobile: "actions" as const,
-          cell: (r: InvoiceListRow) => (
-            <Link
-              href={`/tables/invoices?focus=${r.id}`}
-              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-              data-testid={`link-open-invoice-${r.id}`}
-            >
-              Open <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
-          ),
-        }]
-      : []),
+    {
+      id: "actions",
+      header: "",
+      align: "right" as const,
+      mobile: "actions" as const,
+      cell: (r: InvoiceListRow) => (
+        <Link
+          href={isAdmin ? `/tables/invoices?focus=${r.id}` : `/invoices/${r.id}`}
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          data-testid={`link-open-invoice-${r.id}`}
+        >
+          Open <ExternalLink className="w-3.5 h-3.5" />
+        </Link>
+      ),
+    },
   ];
 
   return (

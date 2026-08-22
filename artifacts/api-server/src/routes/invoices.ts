@@ -983,6 +983,49 @@ router.post("/invoices/:id/recalculate-fee", ...requireInvoiceTransactionPermiss
   });
 });
 
+// Single invoice — the read half of the same day-to-day transactional surface
+// PUT /invoices/:id already exposes to anyone with finance.transactions
+// (independent of the company-owner flag). This is what a non-owner,
+// non-admin bookkeeper's "Open" link on the transaction list resolves to,
+// since the admin data grid's per-record screen
+// (/tables/invoices?focus=<id>) is requireAdmin-gated and stays that way.
+// Same fields, same authorization tier as the PUT — this is not a broader
+// read than the edit action already grants.
+router.get("/invoices/:id", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [row] = await db
+    .select({
+      id: invoicesTable.id,
+      invoiceNumber: invoicesTable.invoiceNumber,
+      clientId: invoicesTable.clientId,
+      siteId: invoicesTable.siteId,
+      siteName: sitesTable.name,
+      periodStart: invoicesTable.periodStart,
+      periodEnd: invoicesTable.periodEnd,
+      clientName: invoicesTable.clientName,
+      clientEmail: invoicesTable.clientEmail,
+      clientAddress: invoicesTable.clientAddress,
+      lineItems: invoicesTable.lineItems,
+      subtotal: invoicesTable.subtotal,
+      taxAmount: invoicesTable.taxAmount,
+      totalAmount: invoicesTable.totalAmount,
+      status: invoicesTable.status,
+      dueDate: invoicesTable.dueDate,
+      paidAt: invoicesTable.paidAt,
+      notes: invoicesTable.notes,
+      autoSynced: invoicesTable.autoSynced,
+      lockedAt: invoicesTable.lockedAt,
+      processingFeeRate: invoicesTable.processingFeeRate,
+      processingFeeAmount: invoicesTable.processingFeeAmount,
+      createdAt: invoicesTable.createdAt,
+    })
+    .from(invoicesTable)
+    .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+    .where(eq(invoicesTable.id, id));
+  if (!row) { res.status(404).json({ error: "Not Found" }); return; }
+  res.json(row);
+});
+
 router.put("/invoices/:id", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clientEmail, clientAddress, lineItems, status, dueDate, notes } = req.body;

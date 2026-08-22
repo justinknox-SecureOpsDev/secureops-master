@@ -37,6 +37,12 @@ created a second writer racing the same constraint at publish time.
   dangerous migration** in this stack — treat any such publish as an incident
   risk and verify prod data first via read-only queries.
 
+- **A pre-publish safeguard must fail CLOSED.** A uniqueness precondition that
+  could not be evaluated (unreadable table, unsupported declaration) has to
+  block the publish exactly like a detected violation — "we could not tell" read
+  as "the data is fine" is how this class of gate silently stops protecting
+  anything.
+
 ## How to check redeploy safety
 
 Diff dev vs prod before publishing: `information_schema.columns`,

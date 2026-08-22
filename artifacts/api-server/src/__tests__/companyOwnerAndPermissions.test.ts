@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, getTableColumns } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -21,6 +21,7 @@ import app from "../app";
 import { signToken } from "../middlewares/auth";
 import { loadPermissionOverridesFromDb, clearPermissionOverrideInMemory } from "../lib/permissions";
 import { countCompanyOwners, backfillCompanyOwnersFromAdminRole, shouldClaimCompanyOwnerRollout } from "../lib/companyOwner";
+import { DASHBOARD_FINANCE_FIELDS } from "../lib/financeVisibility";
 
 // Task #733 — company-owner flag & custom-role permission matrix.
 //
@@ -287,6 +288,101 @@ describe("Non-owner bookkeepers with finance.transactions can browse (sanitized)
     // Company-wide: still refused without the owner flag.
     const boardRes = await request(app).get("/api/payroll/board").set(authed(ctx.nonOwnerAdminToken));
     expect(boardRes.status).toBe(403);
+  });
+
+  // Task #744 — the sanitized lists above only tell a non-owner bookkeeper a
+  // record exists; the admin grid's per-record screen they'd otherwise deep
+  // link to (/tables/payroll_entries, /tables/invoices) is requireAdmin, so
+  // they had nowhere to actually open one. GET /payroll/:id and
+  // GET /invoices/:id are the read half of that new, separate detail
+  // surface — gated by the same finance.transactions permission as the
+  // sibling PUT routes (not the list's owner-or-permission gate, and not the
+  // admin grid's requireAdmin), so they return the same unsanitized
+  // transaction-level record PUT already exposes to this permission holder.
+  it("lets a non-owner permission holder GET a single payroll entry by id, unsanitized", async () => {
+    const res = await request(app).get(`/api/payroll/${payrollEntryId}`).set(authed(ctx.nonOwnerAdminToken));
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(payrollEntryId);
+    expect(res.body.grossPay).toBe("1200.00");
+    expect(res.body.netPay).toBe("1200.00");
+    expect(res.body.status).toBe("pending");
+  });
+
+  it("lets a non-owner permission holder GET a single invoice by id, unsanitized", async () => {
+    const res = await request(app).get(`/api/invoices/${invoiceId}`).set(authed(ctx.nonOwnerAdminToken));
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(invoiceId);
+    expect(res.body.subtotal).toBe("5000.00");
+    expect(res.body.totalAmount).toBe("5000.00");
+    expect(res.body.invoiceNumber).toBe(`${TAG}-INV-1`);
+  });
+
+  it("blocks a plain site_manager (no finance.transactions) from GET /payroll/:id and GET /invoices/:id", async () => {
+    const payrollRes = await request(app).get(`/api/payroll/${payrollEntryId}`).set(authed(ctx.siteManagerToken));
+    expect(payrollRes.status).toBe(403);
+    const invoiceRes = await request(app).get(`/api/invoices/${invoiceId}`).set(authed(ctx.siteManagerToken));
+    expect(invoiceRes.status).toBe(403);
+  });
+
+  it("404s GET /payroll/:id and GET /invoices/:id for a permission holder when the id doesn't exist", async () => {
+    const missingId = randomUUID();
+    const payrollRes = await request(app).get(`/api/payroll/${missingId}`).set(authed(ctx.nonOwnerAdminToken));
+    expect(payrollRes.status).toBe(404);
+    const invoiceRes = await request(app).get(`/api/invoices/${missingId}`).set(authed(ctx.nonOwnerAdminToken));
+    expect(invoiceRes.status).toBe(404);
+  });
+
+  // Task #779 — the bookkeeper's single-record detail pages only exposed
+  // status/notes for editing even though PUT /payroll/:id and
+  // PUT /invoices/:id are the same finance.transactions-gated routes the
+  // admin-only grid uses to record a real payment or due-date change.
+  // Extending the fields these routes accept (not the gate) so that surface
+  // isn't a dead end for day-to-day bookkeeping. Run before the site_manager
+  // grant below, while that role still lacks finance.transactions.
+  it("lets a non-owner permission holder PUT paidAt, paidMethod and paymentReference on a payroll entry", async () => {
+    const res = await request(app)
+      .put(`/api/payroll/${payrollEntryId}`)
+      .set(authed(ctx.nonOwnerAdminToken))
+      .send({ paidAt: "2020-02-05", paidMethod: "manual", paymentReference: "CHK-4471" });
+    expect(res.status).toBe(200);
+    expect(res.body.paidMethod).toBe("manual");
+    expect(res.body.paymentReference).toBe("CHK-4471");
+    expect(new Date(res.body.paidAt).toISOString().slice(0, 10)).toBe("2020-02-05");
+    // Status untouched by this call.
+    expect(res.body.status).toBe("pending");
+  });
+
+  it("rejects an invalid paidMethod on PUT /payroll/:id rather than storing it", async () => {
+    const res = await request(app)
+      .put(`/api/payroll/${payrollEntryId}`)
+      .set(authed(ctx.nonOwnerAdminToken))
+      .send({ notes: "reconciled by bookkeeper", paidMethod: "cash-under-the-table" });
+    expect(res.status).toBe(200);
+    // Invalid value silently ignored — previous valid value (set above) survives.
+    expect(res.body.paidMethod).toBe("manual");
+    expect(res.body.notes).toBe("reconciled by bookkeeper");
+  });
+
+  it("lets a non-owner permission holder PUT a new dueDate on an invoice", async () => {
+    const res = await request(app)
+      .put(`/api/invoices/${invoiceId}`)
+      .set(authed(ctx.nonOwnerAdminToken))
+      .send({ dueDate: "2020-03-15" });
+    expect(res.status).toBe(200);
+    expect(res.body.dueDate).toBe("2020-03-15");
+  });
+
+  it("blocks a plain site_manager (no finance.transactions) from PUT /payroll/:id and PUT /invoices/:id", async () => {
+    const payrollRes = await request(app)
+      .put(`/api/payroll/${payrollEntryId}`)
+      .set(authed(ctx.siteManagerToken))
+      .send({ paymentReference: "should-not-land" });
+    expect(payrollRes.status).toBe(403);
+    const invoiceRes = await request(app)
+      .put(`/api/invoices/${invoiceId}`)
+      .set(authed(ctx.siteManagerToken))
+      .send({ dueDate: "2020-04-01" });
+    expect(invoiceRes.status).toBe(403);
   });
 
   it("granting finance.transactions to site_manager lets a non-owner site_manager browse both (sanitized) lists", async () => {
@@ -916,5 +1012,151 @@ describe("Permission-matrix toggles now also govern shift edit, time-entry appro
       clearPermissionOverrideInMemory("personnel.manage");
       await loadPermissionOverridesFromDb();
     }
+  });
+});
+
+// Task #745 — the two describe blocks above only assert that the fields
+// present *today* (grossPay/netPay/subtotal/totalAmount) are stripped from
+// the plain payroll/invoice lists for a non-owner. That leaves a silent gap:
+// a later change could add a brand-new money-shaped column to either table,
+// select it in the list route, and never add it to DASHBOARD_FINANCE_FIELDS
+// — the leak would ship with green tests because nothing asserted the
+// *complete* set of money columns, only the ones someone remembered to check.
+//
+// This closes that gap at the schema level: every `numeric` column on
+// payrollEntriesTable / invoicesTable must be accounted for by EITHER the
+// small per-record allowlist below (rates/durations that are intentionally
+// visible to a non-owner bookkeeper, the same class as shift payRate) OR
+// DASHBOARD_FINANCE_FIELDS. Adding a numeric column to either table without
+// updating one of those two lists fails this test immediately, and the two
+// live-endpoint tests below independently prove the strip is actually wired
+// up at runtime (not just declared).
+describe("Every numeric (money-shaped) column on the payroll/invoice list rows is either allowlisted or stripped for non-owners", () => {
+  // hourlyRate: a single officer's own pay rate for that pay period — the
+  // same class as shift payRate, which is visible to internal staff
+  // (including a non-owner, finance-bearing dispatcher/admin) under the
+  // separate role-based axis in stripShiftFinanceForRole. totalHours is a
+  // duration, not money, even though it's stored as `numeric`.
+  const PAYROLL_NUMERIC_ALLOWLIST = new Set(["totalHours", "hourlyRate"]);
+  // Every numeric column on invoices is a dollar figure with no per-record
+  // "rate that's fine to browse in bulk" exception — nothing is allowlisted.
+  const INVOICE_NUMERIC_ALLOWLIST = new Set<string>([]);
+
+  function numericColumnKeys(table: Parameters<typeof getTableColumns>[0]): string[] {
+    const columns = getTableColumns(table);
+    return Object.entries(columns)
+      .filter(([, col]) => (col as { columnType?: string }).columnType === "PgNumeric")
+      .map(([key]) => key);
+  }
+
+  const payrollNumericKeys = numericColumnKeys(payrollEntriesTable);
+  const invoiceNumericKeys = numericColumnKeys(invoicesTable);
+
+  it("payroll_entries has at least one numeric column to check (sanity guard against a schema-introspection regression)", () => {
+    expect(payrollNumericKeys.length).toBeGreaterThan(0);
+  });
+
+  it("invoices has at least one numeric column to check (sanity guard against a schema-introspection regression)", () => {
+    expect(invoiceNumericKeys.length).toBeGreaterThan(0);
+  });
+
+  it.each(payrollNumericKeys)("payroll_entries.%s is either allowlisted for bookkeepers or in DASHBOARD_FINANCE_FIELDS", (key) => {
+    const covered = PAYROLL_NUMERIC_ALLOWLIST.has(key) || DASHBOARD_FINANCE_FIELDS.has(key);
+    expect(covered).toBe(true);
+  });
+
+  it.each(invoiceNumericKeys)("invoices.%s is either allowlisted for bookkeepers or in DASHBOARD_FINANCE_FIELDS", (key) => {
+    const covered = INVOICE_NUMERIC_ALLOWLIST.has(key) || DASHBOARD_FINANCE_FIELDS.has(key);
+    expect(covered).toBe(true);
+  });
+
+  describe("live GET /payroll and GET /invoices responses to a non-owner never carry an unallowlisted numeric field", () => {
+    let liveEntryId: string;
+    let liveInvoiceId: string;
+
+    beforeAll(async () => {
+      const [entry] = await db
+        .insert(payrollEntriesTable)
+        .values({
+          employeeId: ctx.officerId,
+          siteId: ctx.siteId,
+          periodStart: "2020-02-03",
+          periodEnd: "2020-02-09",
+          totalHours: "12.00",
+          hourlyRate: "30.00",
+          grossPay: "360.00",
+          tax: "0",
+          netPay: "360.00",
+          status: "pending",
+        })
+        .returning({ id: payrollEntriesTable.id });
+      liveEntryId = entry.id;
+
+      const [invoice] = await db
+        .insert(invoicesTable)
+        .values({
+          invoiceNumber: `${TAG}-INV-numeric-guard`,
+          clientId: ctx.clientId,
+          siteId: ctx.siteId,
+          clientName: `${TAG}-client`,
+          lineItems: [{ description: "Officer coverage", hours: 12, rate: 30, amount: 360 }],
+          subtotal: "360.00",
+          taxAmount: "10.00",
+          totalAmount: "370.00",
+          processingFeeRate: "3.00",
+          processingFeeAmount: "11.10",
+          status: "draft",
+          dueDate: "2020-03-01",
+        })
+        .returning({ id: invoicesTable.id });
+      liveInvoiceId = invoice.id;
+    });
+
+    afterAll(async () => {
+      await db.delete(payrollEntriesTable).where(eq(payrollEntriesTable.id, liveEntryId));
+      await db.delete(invoicesTable).where(eq(invoicesTable.id, liveInvoiceId));
+    });
+
+    it("GET /payroll strips every non-allowlisted numeric field for a non-owner", async () => {
+      const res = await request(app).get("/api/payroll").set(authed(ctx.nonOwnerAdminToken));
+      expect(res.status).toBe(200);
+      const row = res.body.find((r: { id: string }) => r.id === liveEntryId);
+      expect(row).toBeDefined();
+      for (const key of payrollNumericKeys) {
+        if (PAYROLL_NUMERIC_ALLOWLIST.has(key)) continue;
+        expect(row).not.toHaveProperty(key);
+      }
+      // The allowlisted fields are still there — this isn't over-stripping.
+      expect(row.totalHours).toBe("12.00");
+      expect(row.hourlyRate).toBe("30.00");
+    });
+
+    it("GET /invoices strips every numeric field (and lineItems) for a non-owner", async () => {
+      const res = await request(app).get("/api/invoices").set(authed(ctx.nonOwnerAdminToken));
+      expect(res.status).toBe(200);
+      const row = res.body.find((r: { id: string }) => r.id === liveInvoiceId);
+      expect(row).toBeDefined();
+      for (const key of invoiceNumericKeys) {
+        expect(row).not.toHaveProperty(key);
+      }
+      expect(row).not.toHaveProperty("lineItems");
+      // Non-financial fields needed to locate the record are untouched.
+      expect(row.invoiceNumber).toBe(`${TAG}-INV-numeric-guard`);
+      expect(row.status).toBe("draft");
+    });
+
+    it("a company owner still sees every numeric field and the line items, unstripped", async () => {
+      const payrollRes = await request(app).get("/api/payroll").set(authed(ctx.ownerAdminToken));
+      const payrollRow = payrollRes.body.find((r: { id: string }) => r.id === liveEntryId);
+      expect(payrollRow.grossPay).toBe("360.00");
+      expect(payrollRow.netPay).toBe("360.00");
+
+      const invoiceRes = await request(app).get("/api/invoices").set(authed(ctx.ownerAdminToken));
+      const invoiceRow = invoiceRes.body.find((r: { id: string }) => r.id === liveInvoiceId);
+      expect(invoiceRow.subtotal).toBe("360.00");
+      expect(invoiceRow.taxAmount).toBe("10.00");
+      expect(invoiceRow.processingFeeAmount).toBe("11.10");
+      expect(invoiceRow.lineItems).toHaveLength(1);
+    });
   });
 });

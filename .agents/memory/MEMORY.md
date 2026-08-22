@@ -1,3 +1,4 @@
+- [Finance field-name allowlist schema drift](finance-field-schema-drift-guard.md) — pair DASHBOARD_FINANCE_FIELDS-style money strips with a getTableColumns numeric-column test, or new money columns leak silently.
 - [Prod "Failed to load" transients](prod-failed-to-load-transients.md) — "Failed to load X" cards in prod usually = Reserved-VM redeploy restart window, not a backend bug; confirm with healthz + logs.
 - [wouter bare-base routing](wouter-base-routing.md) — wouter with bare base "" 404 gotcha (client portal login).
 - [expo-router Tabs reuse](expo-router-tabs-reuse.md) — dynamic detail/edit routes need a nested Stack, not flat Tabs siblings (instance reuse leaks stale params/state)
@@ -140,4 +141,19 @@
 - [hidden attribute overridden by CSS](hidden-attribute-css-override.md) — an author `display` rule on the same selector silently beats `[hidden]{display:none}`; needs an explicit `sel[hidden]{display:none}` override.
 - [Unknown vs empty UI state](unknown-vs-empty-ui-state.md) — "my save didn't take" is usually a swallowed status read drawn as the default/empty card; write reply is authoritative, 5xx/no-answer = unconfirmed.
 - [Company-owner flag vs permission matrix](company-owner-vs-permission-matrix.md) — owner flag = aggregate financial dashboards only; permission matrix = per-role module actions; full-gate vs sanitize-in-place split; audit existing test fixtures when gating an open route; extending a toggle to sibling routes needs an EXACT role-set match.
+- [AI assistant action safety](assistant-action-safety.md) — no privileged path; confirmation cards must be built from reads made AS the caller; only proven pre-send failures may claim "nothing changed".
+- [Feature-gated help surfaces](feature-gated-help-surfaces.md) — nav, suggestion cards AND assistant articles all gate on FeatureKey; one article = one feature or it lies about what's switched on.
+- [One replay-protection mechanism](idempotency-single-mechanism.md) — non-idempotent/money writes use the shared idempotency middleware; never a bespoke in-route cache (body-flag callers keep working via an option).
+- [Assistant write idempotency](assistant-write-idempotency.md) — retry must live inside the dispatch (claim is single-use); never evict a key on socket close, or the retry double-applies.
 - [Stale composite-project dist](stale-composite-project-dist.md) — tsc --noEmit on api-server can show phantom errors from a referenced lib's stale dist/*.d.ts; tsc --build --force that lib first.
+- [Idempotency key client policy](idempotency-key-client-policy.md) — one key per user INTENT, rotate only after success, keep it after failure; a keyed write may be auto-retried.
+- [In-flight 409 ≠ refusal](idempotency-in-flight-409.md) — replay-protection's "still processing" 409 is a pending state; tell it from route 409s by code, join it, never render it as failure.
+- [supertest lazy send](supertest-lazy-send.md) — a built-but-not-awaited/then-ed supertest request never reaches the server; concurrency tests must force-send it, then await a start signal.
+- [Settings-surface discovery](admin-settings-surface-discovery.md) — singleton config pages vs CRUD lists only separate cleanly by route prefix (/admin/platform|/admin/permissions); generic-type regex must exclude parens or it skips real call sites.
+- [Bookkeeper single-record detail surface](bookkeeper-record-detail-surface.md) — non-owner/non-admin per-record GET/edit mirrors PUT's finance.transactions gate, not the list's owner-or-permission gate; site_manager can't reach admin-portal at all today.
+- [Stuck open shift admin-close](stuck-shift-admin-close.md) — manual "stuck" flags must derive both the threshold and any per-entity policy lookup from the SAME automated sweep job (incl. its on-site/freshness exclusions), never a separate guess.
+- [Durable idempotency store design](durable-idempotency-store.md) — outcome store for retry-safe writes moved in-memory→Postgres; unresolved claims must NEVER be swept/evicted, at any capacity.
+- [Idempotency TTL sweep testing](idempotency-ttl-sweep-testing.md) — prove a swept/released row is gone via an unrelated key hitting a size-1 cap, not same-key replay; release-on-finish isn't retried on DB error.
+- [CSP frame-src vs direct signed-URL iframes](csp-framesrc-signed-url-iframe.md) — any `<iframe src={signedObjectStorageUrl}>` (not fetch+blob) needs frame-src to allow https:, not just 'self'/blob:, or prod silently blank-blocks it.
+- [Admin-portal inline/field feature gates](admin-portal-inline-field-feature-gates.md) — hide one field/section (not a whole route/table) via `Field.feature` + `FeatureLockedNote`; extend featureGuards.test.ts parsers or ADMIN_ABSENT hides real gaps.
+- [Cross-platform assistant chat client](assistant-chat-client-shared-module.md) — admin-portal + mobile AI Bot chat/approve/discard/status AND suggestions fetch/dismiss all live in one framework-light @workspace/assistant-chat-client package.

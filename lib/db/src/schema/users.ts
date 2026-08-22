@@ -2,6 +2,7 @@ import { pgTable, text, uuid, timestamp, numeric, boolean, jsonb, index } from "
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
+import { subcontractorsTable } from "./subcontractors";
 
 export const usersTable = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -87,6 +88,12 @@ export const usersTable = pgTable("users", {
   // Null for admin/dispatcher/employee accounts. The client portal enforces
   // server-side that every data access is scoped to sites owned by this clientId.
   clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
+  // For role="subcontractor" users — links to the vendor record they
+  // represent, mirroring clientId above. Null until the invited
+  // subcontractor submits their own profile for the first time (the
+  // `subcontractors` row is created THEN, not at invite time — see
+  // routes/subcontractorPortal.ts). Null for every other role.
+  subcontractorId: uuid("subcontractor_id").references(() => subcontractorsTable.id, { onDelete: "set null" }),
   // Set the first time the user ever successfully completes /auth/login
   // (or /auth/login-totp). Stays sticky after that. Powers the "NEW"
   // pill on the admin personnel list so admins can tell at a glance

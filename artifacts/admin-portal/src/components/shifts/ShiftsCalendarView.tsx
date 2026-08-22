@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, isStillProcessing, STILL_SAVING_MESSAGE } from "@/lib/api";
+import { useIdempotentIntent } from "@/lib/idempotentIntent";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
@@ -112,6 +113,11 @@ export function ShiftsCalendarView({
   const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
   const [assigningShiftId, setAssigningShiftId] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
+  // The shift whose assignment the server never confirmed: still running under
+  // its key when `api()` stopped waiting. A save in progress, not a refusal, so
+  // it never becomes a `dropError` — the calendar is refreshed and dropping
+  // again stays safe, since the same key can only replay, never assign twice.
+  const [stillSavingShiftId, setStillSavingShiftId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jumpDate) return;
@@ -212,17 +218,33 @@ export function ShiftsCalendarView({
     staleTime: 30_000,
   });
 
+  // One intent per (shift, officer): a repeated drop of the same officer onto
+  // the same shift reuses its idempotency key and replays the first
+  // assignment rather than creating a second one.
+  const intent = useIdempotentIntent();
   const assignMutation = useMutation({
     mutationFn: ({ shiftId, employeeId }: { shiftId: string; employeeId: string }) =>
-      api(`/shifts/${shiftId}/assignments`, {
-        method: "POST",
-        body: { employeeId, status: "accepted" },
-      }),
+      intent.run(`assign:${shiftId}:${employeeId}`, (idempotencyKey) =>
+        api(`/shifts/${shiftId}/assignments`, {
+          method: "POST",
+          idempotencyKey,
+          body: { employeeId, status: "accepted" },
+        }),
+      ),
     onSuccess: () => {
       onChange();
       qc.invalidateQueries({ queryKey: ["shifts-area", "roster", rosterShiftId] });
     },
-    onError: (e) => setDropError(e instanceof Error ? e.message : "Could not assign officer."),
+    onError: (e, vars) => {
+      if (isStillProcessing(e)) {
+        setStillSavingShiftId(vars.shiftId);
+        // It may have landed while we waited — refresh so a completed
+        // assignment shows itself on the calendar rather than staying invisible.
+        onChange();
+      } else {
+        setDropError(e instanceof Error ? e.message : "Could not assign officer.");
+      }
+    },
     onSettled: () => setAssigningShiftId(null),
   });
 
@@ -281,6 +303,7 @@ export function ShiftsCalendarView({
           );
           return;
         }
+        setStillSavingShiftId(null);
         setAssigningShiftId(shiftId);
         assignMutation.mutate({ shiftId, employeeId: officer.userId });
       } catch {
@@ -546,6 +569,7 @@ export function ShiftsCalendarView({
                         const isRosterSelected = s.id === rosterShiftId;
                         const isDragOver = s.id === dragOverShiftId;
                         const isAssigning = s.id === assigningShiftId;
+                        const isStillSaving = s.id === stillSavingShiftId;
                         const activate = () => {
                           if (!isPast) {
                             setRosterShiftId(s.id === rosterShiftId ? null : s.id);
@@ -599,9 +623,12 @@ export function ShiftsCalendarView({
                                 Details
                               </button>
                               {isAssigning && (
-                                <span className="flex items-center gap-1 text-[10px] opacity-60">
+                                <span role="status" className="flex items-center gap-1 text-[10px] opacity-60">
                                   <Loader2 className="w-3 h-3 animate-spin" /> Assigning…
                                 </span>
+                              )}
+                              {!isAssigning && isStillSaving && (
+                                <span className="text-[10px] opacity-60">Still saving — not confirmed</span>
                               )}
                             </div>
                           </div>
@@ -624,6 +651,12 @@ export function ShiftsCalendarView({
                 >
                   ×
                 </button>
+              </div>
+            )}
+
+            {stillSavingShiftId && (
+              <div role="status" className="rounded border bg-muted/40 text-muted-foreground text-xs px-3 py-2">
+                {STILL_SAVING_MESSAGE}
               </div>
             )}
           </div>

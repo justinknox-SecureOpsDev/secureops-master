@@ -191,6 +191,15 @@ td.actions { display: flex; gap: 6px; justify-content: flex-end; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); padding: 11px 18px; border-radius: 11px; z-index: 80; }
 .toast.error { border-color: var(--bad); color: var(--bad); }
 
+/* Inline save/load status — rendered next to the control that produced it
+   rather than a page-top banner, and distinct from a toast which fades. See
+   .agents/memory/unknown-vs-empty-ui-state.md. */
+.settings-msg { margin: 10px 0; padding: 8px 11px; border-radius: 9px; font-size: 12.5px; border: 1px solid; }
+.settings-msg.ok { border-color: rgba(62,207,142,.4); background: rgba(62,207,142,.1); color: var(--ok); }
+.settings-msg.warn { border-color: rgba(224,169,59,.4); background: rgba(224,169,59,.12); color: var(--warn); }
+.settings-msg.error { border-color: rgba(229,97,94,.4); background: rgba(229,97,94,.1); color: var(--bad); }
+.settings-msg button { margin-left: 8px; }
+
 @media (max-width: 720px) {
   .settings-grid, .features { grid-template-columns: 1fr; }
   table.fleet { font-size: 13px; }

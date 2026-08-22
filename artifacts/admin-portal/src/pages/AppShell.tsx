@@ -7,7 +7,7 @@ import {
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
   ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3, LayoutDashboard,
-  SlidersHorizontal, Clock,
+  SlidersHorizontal, Clock, Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -130,6 +130,13 @@ export function buildNavGroups(
   featureEnabled: (key: FeatureKey) => boolean = () => true,
   isCompanyOwner = false,
   hasFinanceTransactions = false,
+  // A site_manager who has been granted finance.transactions via the
+  // Permissions page (Task #778). This role never gets the dispatcher IA or
+  // the admin IA — it gets exactly the bookkeeper surfaces (payroll +
+  // invoices) that permission unlocks, nothing else. Mutually exclusive with
+  // `isDispatcher` in practice (a caller's role is one or the other), but
+  // checked independently so callers can't accidentally combine them.
+  isSiteManagerBookkeeper = false,
 ): NavGroup[] {
   // Admin-only landing dashboard. Listed first so `/` resolves here (exact
   // match — "/" only prefix-matches itself, so it never shadows other routes).
@@ -137,7 +144,10 @@ export function buildNavGroups(
     key: "overview",
     label: "Dashboard",
     Icon: LayoutDashboard,
-    items: [{ href: "/", label: "Dashboard", Icon: LayoutDashboard }],
+    items: [
+      { href: "/", label: "Dashboard", Icon: LayoutDashboard },
+      { href: "/assistant", label: "Secure Ops AI Bot", Icon: Sparkles, feature: "assistant", badge: "NEW" },
+    ],
   };
 
   const dispatchGroup: NavGroup = {
@@ -220,6 +230,7 @@ export function buildNavGroups(
       { href: "/tables/subcontractor_invoices", label: "Invoices", Icon: Receipt },
       { href: "/subcontractors/pay-run", label: "Subcontractor Pay Run", Icon: Banknote },
       { href: "/subcontractors/clock-in-entries", label: "Clock-In Entries", Icon: ClipboardList },
+      { href: "/subcontractors/invites", label: "Subcontractor Portal Users", Icon: UsersIcon },
     ],
   };
 
@@ -282,6 +293,25 @@ export function buildNavGroups(
         items: g.items.filter((it) => !it.feature || featureEnabled(it.feature)),
       }))
       .filter((g) => g.items.length > 0);
+
+  if (isSiteManagerBookkeeper) {
+    // Deliberately minimal: this role never had any admin-portal presence
+    // before finance.transactions was grantable to site managers, so there
+    // is no existing IA to preserve — just the two bookkeeper boards (which
+    // render the sanitized, non-owner list) plus account settings.
+    return applyFeatures([
+      {
+        key: "accounting",
+        label: "Accounting",
+        Icon: Calculator,
+        items: [
+          { href: "/payroll/board", label: "Payroll", Icon: Wallet, feature: "payroll" },
+          { href: "/invoices/board", label: "Invoices", Icon: Receipt, feature: "invoicing" },
+        ],
+      },
+      accountGroup,
+    ]);
+  }
 
   if (isDispatcher) {
     return applyFeatures([
@@ -407,6 +437,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const isDispatcher = user?.role === "dispatcher";
+  // Site manager granted finance.transactions (Task #778) — see buildNavGroups.
+  const isSiteManagerBookkeeper =
+    user?.role === "site_manager" && !!user?.permissions?.includes("finance.transactions");
   const isSuperAdmin = useIsSuperAdmin(user?.role);
   const systemStatus = useSystemStatus(user?.role);
   // Aggregate unread chat badge — enabled for any admin/dispatcher (the only
@@ -436,8 +469,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       isFeatureEnabled,
       !!user?.isCompanyOwner,
       !!user?.permissions?.includes("finance.transactions"),
+      isSiteManagerBookkeeper,
     ),
-    [isDispatcher, isSuperAdmin, user?.isCompanyOwner, user?.permissions],
+    [isDispatcher, isSuperAdmin, user?.isCompanyOwner, user?.permissions, isSiteManagerBookkeeper],
   );
   const [navOrderOverride, setNavOrderOverride] = useState<string[] | null>(null);
   const savedNavOrder = navOrderOverride ?? user?.uiPreferences?.navGroupOrder ?? null;
@@ -561,9 +595,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="flex-1 flex items-center justify-center px-2 sm:px-4">
-            {isDispatcher
-              ? <GlobalSearch allowedDomainKeys={["employees", "shifts", "chatRooms"]} />
-              : <GlobalSearch />}
+            {isSiteManagerBookkeeper ? (
+              // GET /admin/search is admin/dispatcher-only server-side — a
+              // bookkeeper site manager would only ever see it 403. No
+              // cross-domain search need for a two-page surface anyway.
+              null
+            ) : isDispatcher ? (
+              <GlobalSearch allowedDomainKeys={["employees", "shifts", "chatRooms"]} />
+            ) : (
+              <GlobalSearch />
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden md:block text-right leading-tight">

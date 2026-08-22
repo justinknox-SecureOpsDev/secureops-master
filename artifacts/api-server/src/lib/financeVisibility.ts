@@ -17,6 +17,13 @@
 // summary, time-entry lists) strips the same fields for the same role. Any new
 // endpoint that returns raw `shifts` rows to a non-admin MUST run them through
 // stripShiftFinanceForRole.
+//
+// Every `numeric`-typed column on shiftsTable / timeEntriesTable must be
+// accounted for by the allowlists in financeVisibility.test.ts (schema-drift
+// coverage, mirroring the DASHBOARD_FINANCE_FIELDS test below) — that test
+// fails the moment a new money-shaped column is added to either table
+// without an explicit strip/keep decision, so a new rate field can't
+// silently reach the client role.
 
 /**
  * Strip financial fields a caller must not see before returning a shift row.
@@ -53,10 +60,17 @@ export function stripTimeEntryBillRateForRole<T extends Record<string, unknown>>
 ): T {
   if (role === "admin" || role === "dispatcher") return row;
   if (role === "client") {
-    const { payRate, billRate, ...rest } = row as Record<string, unknown>;
+    const { payRate, billRate, payRateOverride, ...rest } = row as Record<string, unknown>;
     return rest as T;
   }
-  const { billRate, ...rest } = row as Record<string, unknown>;
+  // payRateOverride is the raw admin-set override input on time_entries
+  // (see schema comment on timeEntriesTable.payRateOverride) — the same
+  // admin/dispatcher-only class as billRate, not the officer-facing
+  // resolved `payRate` field. The wired-up caller (routes/timeEntries.ts)
+  // already renames it to `_payRateOverride` and drops it before reaching
+  // here, so this is defense in depth for any other caller that passes a
+  // raw time_entries row straight through.
+  const { billRate, payRateOverride, ...rest } = row as Record<string, unknown>;
   return rest as T;
 }
 
@@ -79,7 +93,28 @@ export function stripTimeEntryBillRateForRole<T extends Record<string, unknown>>
 // than inventing a bespoke strip, so the policy stays centralized.
 // ---------------------------------------------------------------------------
 
-/** Canonical set of aggregate financial field names gated behind the company-owner flag. */
+/**
+ * Canonical set of aggregate financial field names gated behind the
+ * company-owner flag.
+ *
+ * This also covers the GET /payroll and GET /invoices PLAIN LIST endpoints
+ * (see routes/payroll.ts, routes/invoices.ts): a non-owner bookkeeper with
+ * `finance.transactions` may browse those lists to locate a record, but the
+ * list itself must carry NO dollar figure of any kind — not just summed
+ * dashboard totals, but each row's own subtotal/tax/fee/gross/net, since a
+ * list of every record's amount is functionally the same leak as a single
+ * aggregate. (Per-record detail — opening ONE invoice/payroll entry via its
+ * own route — is a separate, allowed axis; see the comment block in
+ * companyOwnerAndPermissions.test.ts.)
+ *
+ * Every `numeric`-typed column on payrollEntriesTable / invoicesTable must
+ * either appear here or be added to the small allowlist of per-record rate/
+ * duration fields in the schema-drift test (companyOwnerAndPermissions.test.ts)
+ * that are intentionally NOT aggregate money (e.g. hourlyRate — a single
+ * officer's own rate, the same class as shift payRate). That test fails the
+ * build the moment a new numeric column is added to either table without an
+ * explicit decision either way, so this list can't silently go stale.
+ */
 export const DASHBOARD_FINANCE_FIELDS = new Set([
   "revenue",
   "totalRevenue",
@@ -100,12 +135,22 @@ export const DASHBOARD_FINANCE_FIELDS = new Set([
   "totalBilled",
   "totalAmount",
   "subtotal",
+  "tax",
+  "taxAmount",
   "feeAmount",
+  "processingFeeAmount",
+  "processingFeeRate",
   "invoiceTotal",
   "payrollTotal",
   "avgBillRate",
   "avgPayRate",
   "billableRevenue",
+  // Not a numeric column, but a jsonb array of per-line { hours, rate,
+  // amount } money breakdown — the single richest source of company money
+  // detail on the invoice list row. The plain list has no legitimate use
+  // for it (only /invoices/:id/entries and the PDF route do), so it is
+  // stripped as a whole rather than trying to sanitize nested line items.
+  "lineItems",
 ]);
 
 /**

@@ -58,6 +58,9 @@ const MOBILE_SURFACES: Record<string, string[] | "absent"> = {
   hr: "absent",
   exports: "absent",
   officerShares: "absent",
+  // The assistant answers portal questions and drives portal actions; officers
+  // have no equivalent screen in the field app.
+  assistant: "absent",
 };
 
 /** Recursively list every .tsx file under app/, as posix paths from ROOT. */

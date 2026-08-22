@@ -151,7 +151,7 @@ describe("POST /time-entries/clock-in geo-resolution", () => {
     const rejected = [a, b].filter((response) => response.status === 400);
     expect(succeeded).toHaveLength(1);
     expect(rejected).toHaveLength(1);
-    expect(rejected[0].body.message).toBe("Already clocked in");
+    expect(rejected[0].body.message).toMatch(/already have an open shift/i);
 
     const open = await db
       .select({ id: timeEntriesTable.id })

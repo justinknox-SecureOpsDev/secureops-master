@@ -31,6 +31,12 @@ describe("buildNavGroups", () => {
     ]);
   });
 
+  it("puts the Assistant alongside the Dashboard in the overview group", () => {
+    const overview = adminGroups.find((g) => g.key === "overview");
+    expect(overview?.items.map((i) => i.href)).toEqual(["/", "/assistant"]);
+    expect(overview?.items.find((i) => i.href === "/assistant")?.feature).toBe("assistant");
+  });
+
   it("places HR items under Personnel Management only", () => {
     const hr = adminGroups.find((g) => g.key === "hr");
     expect(hr?.items.map((i) => i.href)).toEqual([
@@ -71,6 +77,7 @@ describe("buildNavGroups", () => {
       "/tables/subcontractor_invoices",
       "/subcontractors/pay-run",
       "/subcontractors/clock-in-entries",
+      "/subcontractors/invites",
     ]);
   });
 
@@ -188,11 +195,13 @@ describe("resolveGroupKey (admin)", () => {
     ["/sites/abc", "clients_sites"],
     ["/tables/sales_leads", "clients_sites"],
     ["/subcontractors/pay-run", "contracts"],
+    ["/subcontractors/invites", "contracts"],
     ["/tables/subcontractors", "contracts"],
     ["/payroll/board", "accounting"],
     ["/invoices/board", "accounting"],
     ["/analytics", "accounting"],
     ["/account/security", "account"],
+    ["/assistant", "overview"],
     ["/tables/users", "platform"],
     ["/settings/invite", "platform"],
     ["/audit-log", "platform"],
@@ -230,6 +239,42 @@ describe("resolveGroupKey (dispatcher)", () => {
 
   it("routes account to the Account tab", () => {
     expect(resolveGroupKey(dispatcherGroups, "/account/security")).toBe("account");
+  });
+});
+
+describe("buildNavGroups (site_manager bookkeeper)", () => {
+  // Task #778: a site_manager granted finance.transactions gets a minimal,
+  // dedicated IA — not the dispatcher one and not the admin one.
+  const bookkeeperGroups = buildNavGroups(false, false, () => true, false, true, true);
+
+  it("gives the bookkeeper site manager exactly Accounting and Account", () => {
+    expect(bookkeeperGroups.map((g) => g.key)).toEqual(["accounting", "account"]);
+  });
+
+  it("Accounting holds only Payroll and Invoices, no analytics/pay-run/raw tables", () => {
+    const accounting = bookkeeperGroups.find((g) => g.key === "accounting");
+    expect(accounting?.items.map((i) => i.href)).toEqual([
+      "/payroll/board",
+      "/invoices/board",
+    ]);
+  });
+
+  it("drops Accounting entirely when payroll and invoicing are both feature-gated off", () => {
+    const groups = buildNavGroups(false, false, (key) => key !== "payroll" && key !== "invoicing", false, true, true);
+    expect(groups.find((g) => g.key === "accounting")).toBeUndefined();
+  });
+
+  it("takes priority over isDispatcher when both flags are somehow set", () => {
+    const groups = buildNavGroups(true, false, () => true, false, true, true);
+    expect(groups.map((g) => g.key)).toEqual(["accounting", "account"]);
+  });
+
+  it("resolves /payroll and /invoices routes to the accounting tab", () => {
+    expect(resolveGroupKey(bookkeeperGroups, "/payroll/board")).toBe("accounting");
+    expect(resolveGroupKey(bookkeeperGroups, "/invoices/board")).toBe("accounting");
+    expect(resolveGroupKey(bookkeeperGroups, "/payroll/abc-123")).toBe("accounting");
+    expect(resolveGroupKey(bookkeeperGroups, "/invoices/abc-123")).toBe("accounting");
+    expect(resolveGroupKey(bookkeeperGroups, "/account/security")).toBe("account");
   });
 });
 

@@ -210,7 +210,7 @@ router.post("/admin/license-renewals/:id/approve", requireAdmin, async (req, res
           // Carry the renewed card photo onto the license record.
           docKey: renewal.docKey,
           // Clear reminder bookkeeping so the new expiry gets a fresh
-          // 30/14/7 reminder cycle.
+          // 60/30/14/7 reminder cycle (see @workspace/license-reminder-schedule).
           lastReminderTier: null,
           lastReminderSentAt: null,
           lastReminderForExpiry: null,

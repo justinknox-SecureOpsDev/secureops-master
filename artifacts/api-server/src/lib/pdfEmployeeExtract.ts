@@ -189,7 +189,7 @@ const PROMPT = [
   "- previousExperience: a short free-text summary of prior roles.",
 ].join("\n");
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.6-flash";
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 2;
 

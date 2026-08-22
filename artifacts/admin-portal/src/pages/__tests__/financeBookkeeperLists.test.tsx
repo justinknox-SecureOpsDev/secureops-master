@@ -24,7 +24,13 @@ vi.mock("@/lib/auth", () => ({
     Array.isArray(hoisted.user.permissions) && (hoisted.user.permissions as string[]).includes(key),
 }));
 
-// Sanitized shapes: exactly what the server returns to a non-owner caller.
+// Sanitized shapes: exactly what the server returns to a non-owner caller
+// (see financeVisibility.ts's DASHBOARD_FINANCE_FIELDS + its schema-drift
+// test). hourlyRate IS included here on purpose — it is the one numeric
+// field the server intentionally does NOT strip (a per-record officer rate,
+// same class as shift payRate) — so this test proves the component still
+// doesn't turn it into a rendered currency value, not just that the sanitized
+// API happens to omit money fields.
 const PAYROLL_ROW = {
   id: "pe1",
   employeeId: "emp1",
@@ -34,6 +40,7 @@ const PAYROLL_ROW = {
   periodStart: "2026-08-03",
   periodEnd: "2026-08-09",
   totalHours: "38.50",
+  hourlyRate: "22.00",
   status: "pending",
   paidAt: null,
   paidMethod: null,
@@ -96,6 +103,23 @@ describe("bookkeeper payroll list", () => {
     expect(screen.queryByRole("button", { name: /process selected/i })).toBeNull();
   });
 
+  it("gives a non-admin bookkeeper the narrower single-record detail link, never the admin grid", async () => {
+    hoisted.user = { id: "u1", role: "dispatcher", isCompanyOwner: false, permissions: ["finance.transactions"] };
+    render(<PayrollBoard />);
+
+    const openLink = await screen.findByTestId("link-open-payroll-pe1");
+    expect(openLink.getAttribute("href")).toBe("/payroll/pe1");
+    expect(openLink.getAttribute("href")).not.toContain("/tables/payroll_entries");
+  });
+
+  it("gives an admin non-owner the admin-grid deep link instead", async () => {
+    hoisted.user = { id: "u3", role: "admin", isCompanyOwner: false, permissions: ["finance.transactions"] };
+    render(<PayrollBoard />);
+
+    const openLink = await screen.findByTestId("link-open-payroll-pe1");
+    expect(openLink.getAttribute("href")).toContain("/tables/payroll_entries?focus=pe1");
+  });
+
   it("still locks the board for a non-owner without the permission", async () => {
     hoisted.user = { id: "u2", role: "dispatcher", isCompanyOwner: false, permissions: [] };
     render(<PayrollBoard />);
@@ -103,6 +127,21 @@ describe("bookkeeper payroll list", () => {
     expect(await screen.findByTestId("owner-locked-state")).toBeTruthy();
     expect(screen.queryByTestId("payroll-transaction-list")).toBeNull();
     await waitFor(() => expect(hoisted.payrollCalls).toEqual([]));
+  });
+
+  // Task #778: a site_manager granted finance.transactions via Settings ->
+  // Permissions must reach the exact same sanitized list a dispatcher with
+  // the same grant does — the board itself never role-gates, only
+  // permission-gates (App.tsx's top-level router is what used to block it).
+  it("renders the same sanitized list for a site_manager holding finance.transactions", async () => {
+    hoisted.user = { id: "u4", role: "site_manager", isCompanyOwner: false, permissions: ["finance.transactions"] };
+    render(<PayrollBoard />);
+
+    expect(await screen.findByTestId("payroll-transaction-list")).toBeTruthy();
+    expect(await screen.findByText("Jane Doe")).toBeTruthy();
+    expect(screen.queryByTestId("owner-locked-state")).toBeNull();
+    const openLink = await screen.findByTestId("link-open-payroll-pe1");
+    expect(openLink.getAttribute("href")).toBe("/payroll/pe1");
   });
 });
 
@@ -129,8 +168,12 @@ describe("bookkeeper invoice list", () => {
     expect(screen.queryByRole("button", { name: /pdf|download|export/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /pdf|download|export/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /email to clients/i })).toBeNull();
-    // Grid deep-link is admin-only (the grid API is requireAdmin).
-    expect(screen.queryByTestId("link-open-invoice-inv1")).toBeNull();
+    // The grid deep-link is admin-only (the grid API is requireAdmin); this
+    // non-admin bookkeeper's Open link goes to the narrower single-record
+    // detail page instead, never to the admin grid.
+    const openLink = await screen.findByTestId("link-open-invoice-inv1");
+    expect(openLink.getAttribute("href")).toBe("/invoices/inv1");
+    expect(openLink.getAttribute("href")).not.toContain("/tables/invoices");
     // No money amount of any kind is rendered (the sanitized rows carry none).
     expect(container.textContent).not.toMatch(/\$\s?\d/);
   });
@@ -150,5 +193,19 @@ describe("bookkeeper invoice list", () => {
     expect(await screen.findByTestId("owner-locked-state")).toBeTruthy();
     expect(screen.queryByTestId("invoice-transaction-list")).toBeNull();
     await waitFor(() => expect(hoisted.invoiceCalls).toEqual([]));
+  });
+
+  // Task #778: same invariant as the payroll list above — a site_manager
+  // bookkeeper reaches the identical sanitized invoice list a dispatcher
+  // bookkeeper does.
+  it("renders the same sanitized list for a site_manager holding finance.transactions", async () => {
+    hoisted.user = { id: "u4", role: "site_manager", isCompanyOwner: false, permissions: ["finance.transactions"] };
+    render(<InvoiceBoard />);
+
+    expect(await screen.findByTestId("invoice-transaction-list")).toBeTruthy();
+    expect(await screen.findByText("WCSG-1001")).toBeTruthy();
+    expect(screen.queryByTestId("owner-locked-state")).toBeNull();
+    const openLink = await screen.findByTestId("link-open-invoice-inv1");
+    expect(openLink.getAttribute("href")).toBe("/invoices/inv1");
   });
 });

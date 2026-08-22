@@ -26,6 +26,7 @@ import {
   invoicesTable,
   shiftRequestsTable,
   licensesTable,
+  siteRatesTable,
 } from "@workspace/db";
 import { requireClient, requireAdmin } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -1490,10 +1491,31 @@ router.post(
     const { h: eh, m: em } = endParts;
     const wrapsOvernight = eh * 60 + em <= sh * 60 + sm;
 
-    // Canonical rate resolution matching routes/shifts.ts:
-    // payRate/billRate canonical; hourlyRate/billableRate legacy aliases kept in sync.
-    const pay = Number(site?.defaultPayRate ?? 0) || 0;
-    const bill = Number(site?.defaultBillRate ?? 0) || 0;
+    // Per-level rate resolution matching routes/shifts.ts's
+    // resolveSiteManagerDefaultRate: look up the site's rate card for each
+    // requested license level (lowest rateTier wins), falling back to the
+    // site's flat legacy default only for a level with no card row. A single
+    // flat rate applied to every level (L2/L3/L4 alike) was the bug here.
+    const cardRows = sr.siteId
+      ? await db
+          .select({ licenseLevel: siteRatesTable.licenseLevel, rateTier: siteRatesTable.rateTier, payRate: siteRatesTable.payRate, billRate: siteRatesTable.billRate, id: siteRatesTable.id })
+          .from(siteRatesTable)
+          .where(eq(siteRatesTable.siteId, sr.siteId))
+      : [];
+    const rateByLevel = new Map<number, { pay: number; bill: number; siteRateId: string }>();
+    const tierByLevel = new Map<number, number>();
+    for (const r of cardRows) {
+      if (r.rateTier < (tierByLevel.get(r.licenseLevel) ?? Infinity)) {
+        tierByLevel.set(r.licenseLevel, r.rateTier);
+        rateByLevel.set(r.licenseLevel, { pay: Number(r.payRate) || 0, bill: Number(r.billRate) || 0, siteRateId: r.id });
+      }
+    }
+    const legacyPay = Number(site?.defaultPayRate ?? 0) || 0;
+    const legacyBill = Number(site?.defaultBillRate ?? 0) || 0;
+    const rateForLevel = (level: number): { pay: number; bill: number; siteRateId: string | null } => {
+      const card = rateByLevel.get(level);
+      return card ? { ...card, siteRateId: card.siteRateId } : { pay: legacyPay, bill: legacyBill, siteRateId: null };
+    };
 
     // Pre-build the shift value objects (avoids per-day db calls, pure data).
     const shiftValueSets: (typeof shiftsTable.$inferInsert)[] = [];
@@ -1516,6 +1538,7 @@ router.post(
 
       for (const { level, count } of levelCounts) {
         const levelLabel = level === 4 ? "L4/PPO" : `L${level}`;
+        const { pay, bill, siteRateId } = rateForLevel(level);
         shiftValueSets.push({
           title: `Coverage — ${site?.name ?? "Site"} (${levelLabel})`,
           siteId: sr.siteId,
@@ -1533,6 +1556,7 @@ router.post(
           requiredLicenseLevel: level,
           headcount: count,
           notes: sr.notes ?? null,
+          siteRateId,
         });
       }
     }

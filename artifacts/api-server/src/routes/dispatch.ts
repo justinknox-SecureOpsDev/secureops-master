@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   db,
   usersTable,
@@ -12,9 +13,11 @@ import {
   employeesTable,
   chatRoomsTable,
   officerAvailabilityWindowsTable,
+  platformCustomerConfigTable,
 } from "@workspace/db";
 import { requireAdmin, requireAdminOrDispatcher, requireAuth } from "../middlewares/auth";
 import { requirePermission } from "../lib/permissions";
+import { isStuckOpenEntry, HOUR_MS } from "../lib/stuckShift";
 
 // Representative wiring for the "dispatch.manage" permission key: assigning
 // an officer to the nearest open shift stays admin/dispatcher by default
@@ -29,6 +32,11 @@ import { isOpenTimeEntryConflict } from "../lib/timeEntryConflict";
 
 const router: IRouter = Router();
 router.use("/dispatch", requireFeature("liveMap"));
+
+// Second reference to sitesTable, joined with the auto-clock-out job's own
+// site-resolution precedence (entry's own siteId wins over its shift's) —
+// see the stuck-flag policy lookup below.
+const policySitesTable = alias(sitesTable, "policy_site");
 
 /**
  * GET /dispatch/config
@@ -57,6 +65,12 @@ const NO_SHOW_MIN = 60;
 const EARLY_OUT_MIN = 30;
 
 const MS_MIN = 60_000;
+
+// "Stuck" open entry detection (isStuckOpenEntry) lives in ../lib/stuckShift
+// — shared with the notifyStuckOpenShifts scheduled job (scheduledJobs.ts)
+// so the admin-facing manual close button and the automated admin alert
+// always agree on exactly which entries are "stuck". See that module for
+// the full policy explanation.
 
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 3958.7613;
@@ -164,6 +178,9 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       lastLat: usersTable.lastLat,
       lastLng: usersTable.lastLng,
       lastLocationAt: usersTable.lastLocationAt,
+      geofenceState: timeEntriesTable.geofenceState,
+      autoClockOutEnabled: policySitesTable.autoClockOutEnabled,
+      autoClockOutDelayMinutes: policySitesTable.autoClockOutDelayMinutes,
     })
     .from(timeEntriesTable)
     .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
@@ -172,8 +189,31 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       sitesTable,
       sql`${sitesTable.id} = coalesce(${shiftsTable.siteId}, ${timeEntriesTable.siteId})`,
     )
+    // Separate join, resolved in the SAME precedence autoClockOutEndedShifts
+    // (scheduledJobs.ts) uses for its own policy lookup — the entry's own
+    // siteId wins over the shift's, the reverse of the display join above.
+    // They usually agree, but can diverge for a legacy/imported or ad-hoc
+    // entry whose siteId doesn't match its shift's site; the stuck flag must
+    // key off the SAME site the real auto-clock-out job would, or it can
+    // green-light closing an entry the job is still legitimately waiting on
+    // (or vice versa).
+    .leftJoin(
+      policySitesTable,
+      sql`${policySitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
+    )
     .where(isNull(timeEntriesTable.clockOutTime))
     .orderBy(asc(timeEntriesTable.clockInTime));
+
+  // Same company-wide default the scheduledJobs.ts sweep reads — a site's
+  // own delay wins, this is only the fallback when a site has none set.
+  const [companySettings] = await db
+    .select({
+      autoClockOutDelayMinutes: platformCustomerConfigTable.autoClockOutDelayMinutes,
+    })
+    .from(platformCustomerConfigTable)
+    .where(eq(platformCustomerConfigTable.id, "singleton"))
+    .limit(1);
+  const companyDefaultDelayMinutes = companySettings?.autoClockOutDelayMinutes;
 
   // An officer clocked into a shift must not ALSO surface as late / no-show /
   // scheduled for THAT same shift. We skip per (officer, shift) so a second
@@ -233,6 +273,18 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       lastLocationAt: e.lastLocationAt,
       clockInTime: e.clockInTime,
       timeEntryId: e.timeEntryId,
+      // See ../lib/stuckShift for the policy.
+      stuck: isStuckOpenEntry({
+        now: now.getTime(),
+        clockInTime: e.clockInTime,
+        shiftEndTime: e.endTime ?? null,
+        autoClockOutEnabled: e.autoClockOutEnabled,
+        autoClockOutDelayMinutes: e.autoClockOutDelayMinutes,
+        companyDefaultDelayMinutes,
+        geofenceState: e.geofenceState,
+        lastLocationAt: e.lastLocationAt,
+      }),
+      hoursOpen: Math.round(((now.getTime() - e.clockInTime.getTime()) / HOUR_MS) * 10) / 10,
     })) as unknown[],
     late: [] as unknown[],
     noShow: [] as unknown[],

@@ -303,6 +303,44 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
       expect(new Date(row.clockOutTime!).getTime()).toBe(shift.endTime.getTime());
     });
 
+    it("falls back to now() with useShiftEnd when clock-in is at/after the shift's scheduled end", async () => {
+      // Clock-in 3h ago, shift "ended" 1h before that clock-in (a late
+      // walk-up clocked in on top of an already-ended shift) — there is no
+      // valid shift-end to snap to, so this must close at time-of-action
+      // instead of 400ing and leaving the admin with the same unusable
+      // stuck record. Uses a recent clockIn (not the fixed BASE_CLOCK_IN
+      // fixture) so hoursWorked from "now" stays within the numeric(6,2)
+      // column's range.
+      const recentClockIn = new Date(Date.now() - 3 * 3600_000);
+      const [shift] = await db
+        .insert(shiftsTable)
+        .values({
+          siteId: ctx.siteId,
+          title: `${TAG}-shift-lateclockin`,
+          startTime: new Date(recentClockIn.getTime() - 5 * 3600_000),
+          endTime: new Date(recentClockIn.getTime() - 1 * 3600_000),
+          payRate: "20.00",
+          billRate: "40.00",
+          headcount: 2,
+          status: "upcoming",
+        })
+        .returning({ id: shiftsTable.id, endTime: shiftsTable.endTime });
+      const id = await insertOpenEntry({ shiftId: shift.id, clockIn: recentClockIn });
+      const before = Date.now();
+
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/clock-out`)
+        .set(authed(ctx.adminToken))
+        .send({ useShiftEnd: true });
+
+      expect(res.status).toBe(200);
+      const [row] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+      expect(new Date(row.clockOutTime!).getTime()).not.toBe(shift.endTime.getTime());
+      expect(new Date(row.clockOutTime!).getTime()).toBeGreaterThanOrEqual(before - 1000);
+      expect(new Date(row.clockOutTime!).getTime()).toBeGreaterThan(recentClockIn.getTime());
+      expect(row.notes).toMatch(/no valid shift-end time/i);
+    });
+
     it("stamps last-edited provenance (who + when)", async () => {
       const id = await insertOpenEntry();
       const before = Date.now();

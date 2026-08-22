@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
-import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
+import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable, siteRatesTable } from "@workspace/db";
 import { requireAuth, requireStaff, requireAdmin, requireSchedulingStaff } from "../middlewares/auth";
 import { requirePermission } from "../lib/permissions";
+import { idempotentWrite } from "../lib/idempotency";
 
 // "scheduling.manage" permission key: create/edit/delete/bulk-create/repeat
 // a shift stay reachable by admin/site_manager by default (matching
@@ -72,6 +73,37 @@ function localDateInTz(utcMs: number, tz: string): string {
   } catch {
     return new Date(utcMs).toISOString().slice(0, 10);
   }
+}
+
+/**
+ * Resolve the default pay/bill rate a site manager's shift should inherit
+ * for a given license level.
+ *
+ * Site managers never see or set rates (client-supplied rate fields are
+ * ignored for them everywhere in this file), so every site-manager shift
+ * create/edit path needs a server-side default. The site's rate CARD
+ * (`site_rates`, edited on the site detail page) is the actual source of
+ * truth admins configure — mirrors the admin portal's own auto-select logic
+ * (`defaultRateForLevel`: same level, lowest rate tier). The legacy flat
+ * `sites.defaultPayRate`/`defaultBillRate` columns predate per-level cards
+ * and are kept only as a fallback for sites that have no card rows yet, so
+ * older sites don't regress to $0.
+ */
+async function resolveSiteManagerDefaultRate(
+  siteId: string,
+  level: number,
+  legacyDefaultPay: string | null,
+  legacyDefaultBill: string | null,
+): Promise<{ pay: number; bill: number; siteRateId: string | null }> {
+  const cardRows = await db
+    .select({ id: siteRatesTable.id, rateTier: siteRatesTable.rateTier, payRate: siteRatesTable.payRate, billRate: siteRatesTable.billRate })
+    .from(siteRatesTable)
+    .where(and(eq(siteRatesTable.siteId, siteId), eq(siteRatesTable.licenseLevel, level)));
+  if (cardRows.length > 0) {
+    const best = cardRows.reduce((a, b) => (b.rateTier < a.rateTier ? b : a));
+    return { pay: Number(best.payRate) || 0, bill: Number(best.billRate) || 0, siteRateId: best.id };
+  }
+  return { pay: Number(legacyDefaultPay) || 0, bill: Number(legacyDefaultBill) || 0, siteRateId: null };
 }
 
 /** Short label for a shift's required level used in push/SMS copy. */
@@ -308,7 +340,11 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
   }));
 });
 
-router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<void> => {
+// `idempotentWrite`: creating a shift commits on the way through, so a caller
+// whose answer was lost cannot safely re-send. Supplying an Idempotency-Key
+// makes the retry replay the original outcome instead of creating a second
+// shift. Absent a key nothing changes. See lib/idempotency.ts.
+router.post("/shifts", ...requireSchedulingManage, idempotentWrite, async (req, res): Promise<void> => {
   const {
     title, siteId, clientName: bodyClientName, location: bodyLocation, locationLat, locationLng,
     startTime, endTime,
@@ -368,14 +404,22 @@ router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<voi
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
   // payRate/billRate are the canonical fields; legacy hourlyRate/billableRate fall back when not set.
-  // Site managers: rates come from the site default when available, otherwise 0 (an admin can
-  // set the rate afterwards — blocking creation outright is worse than a $0 placeholder).
-  const finalPay = isSiteManager
-    ? (Number(siteDefaultPay) || 0)
-    : (payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0));
-  const finalBill = isSiteManager
-    ? (Number(siteDefaultBill) || 0)
-    : (billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0));
+  // Site managers: rates come from the site's rate card for this license level when available,
+  // otherwise 0 (an admin can set the rate afterwards — blocking creation outright is worse than
+  // a $0 placeholder).
+  let finalPay: number;
+  let finalBill: number;
+  if (isSiteManager) {
+    const resolved = await resolveSiteManagerDefaultRate(siteId, lvl, siteDefaultPay, siteDefaultBill);
+    finalPay = resolved.pay;
+    finalBill = resolved.bill;
+    // Note: siteRateId is deliberately NOT carried from `resolved` here — site
+    // managers never get the rate-card FK persisted on their shifts (see the
+    // siteRateId assignment below), only the numeric default it resolved to.
+  } else {
+    finalPay = payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0);
+    finalBill = billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0);
+  }
 
   // Parse claimableFrom: null means no scheduled release; undefined/absent is treated the same.
   // A future ISO timestamp schedules the release. "now" / past ISO = immediate (store null).
@@ -409,7 +453,8 @@ router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<voi
     headcount: hc,
     // siteRateId links a shift to a `site_rates` card (which carries pay/bill
     // rates) — site managers can't pick rate cards, so never persist a
-    // client-supplied one for them.
+    // client-supplied (or server-resolved) one for them; only the resolved
+    // numeric default (finalPay/finalBill above) carries over.
     siteRateId: isSiteManager ? null : (siteRateId || null),
     // PPO Detail shifts carry a protection package (protection_persons rows);
     // anything else is a standard patrol/static shift. Server-side allowlist —
@@ -517,7 +562,11 @@ router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<voi
  * Site-manager rules mirror POST /shifts: must have a site, site must be
  * managed, rate fields are ignored and the site's defaults are used.
  */
-router.post("/shifts/bulk-create", ...requireSchedulingManage, async (req, res): Promise<void> => {
+// `idempotentWrite`: see POST /shifts — this is the same hazard through the
+// multi-position door, and the one the admin portal's "New shift" dialog
+// actually uses. A re-sent create carrying the same Idempotency-Key replays
+// the original 201 instead of inserting a second set of shifts.
+router.post("/shifts/bulk-create", ...requireSchedulingManage, idempotentWrite, async (req, res): Promise<void> => {
   const { title, siteId, startTime, endTime, notes, shiftType, positions } = req.body ?? {};
 
   if (!title || !startTime || !endTime) {
@@ -592,13 +641,21 @@ router.post("/shifts/bulk-create", ...requireSchedulingManage, async (req, res):
     const pObj = p as Record<string, unknown>;
     const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
     const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
-    const finalPay = isSiteManager
-      ? (Number(siteDefaultPay) || 0)
-      : (Number(pObj.payRate) || 0);
-    const finalBill = isSiteManager
-      ? (Number(siteDefaultBill) || 0)
-      : (Number(pObj.billRate) || 0);
-    const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+    let finalPay: number;
+    let finalBill: number;
+    let rateId: string | null;
+    if (isSiteManager) {
+      const resolved = await resolveSiteManagerDefaultRate(siteId, lvl, siteDefaultPay, siteDefaultBill);
+      finalPay = resolved.pay;
+      finalBill = resolved.bill;
+      // FK deliberately not persisted for site managers (see comment on the
+      // single-create path above) — only the resolved numeric default is used.
+      rateId = null;
+    } else {
+      finalPay = Number(pObj.payRate) || 0;
+      finalBill = Number(pObj.billRate) || 0;
+      rateId = typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null;
+    }
     const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${finalPay}|${finalBill}`;
     if (seenSignatures.has(sig)) {
       const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
@@ -854,9 +911,21 @@ router.post("/shifts/repeat", ...requireSchedulingManage, async (req, res): Prom
       const pObj = p as Record<string, unknown>;
       const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
       const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
-      const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(pObj.payRate) || 0);
-      const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(pObj.billRate) || 0);
-      const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+      let pay: number;
+      let bill: number;
+      let rateId: string | null;
+      if (isSiteManager) {
+        const resolved = await resolveSiteManagerDefaultRate(siteId, lvl, site.defaultPayRate, site.defaultBillRate);
+        pay = resolved.pay;
+        bill = resolved.bill;
+        // FK deliberately not persisted for site managers — only the resolved
+        // numeric default is used (see comment on the single-create path).
+        rateId = null;
+      } else {
+        pay = Number(pObj.payRate) || 0;
+        bill = Number(pObj.billRate) || 0;
+        rateId = typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null;
+      }
       const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${pay}|${bill}`;
       if (seenSignatures.has(sig)) {
         const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
@@ -877,9 +946,22 @@ router.post("/shifts/repeat", ...requireSchedulingManage, async (req, res): Prom
     // Legacy single-position fallback.
     const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
     const hc = Math.max(1, Number(headcount) || 1);
-    const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(payRate) || 0);
-    const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(billRate) || 0);
-    positions.push({ requiredLicenseLevel: lvl, headcount: hc, pay, bill, siteRateId: siteRateId || null });
+    let pay: number;
+    let bill: number;
+    let rateId: string | null;
+    if (isSiteManager) {
+      const resolved = await resolveSiteManagerDefaultRate(siteId, lvl, site.defaultPayRate, site.defaultBillRate);
+      pay = resolved.pay;
+      bill = resolved.bill;
+      // FK deliberately not persisted for site managers — only the resolved
+      // numeric default is used (see comment on the single-create path).
+      rateId = null;
+    } else {
+      pay = Number(payRate) || 0;
+      bill = Number(billRate) || 0;
+      rateId = siteRateId || null;
+    }
+    positions.push({ requiredLicenseLevel: lvl, headcount: hc, pay, bill, siteRateId: rateId });
   }
 
   // Cap series length to prevent runaway expansion (~1 year of daily shifts).
@@ -1314,12 +1396,14 @@ router.put("/shifts/:id", ...requireSchedulingManage, async (req, res): Promise<
   // `siteManagerMovedSite` records a manager moving a shift across two managed
   // sites so we can recompute finance from the destination site below.
   let siteManagerMovedSite = false;
+  let currentLevel = 2;
   if (isSiteManager) {
     const [current] = await db
-      .select({ siteId: shiftsTable.siteId })
+      .select({ siteId: shiftsTable.siteId, requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
       .from(shiftsTable)
       .where(eq(shiftsTable.id, id));
     if (!current) { res.status(404).json({ error: "Not Found" }); return; }
+    currentLevel = current.requiredLicenseLevel;
     const actor = { userId: req.user!.userId, role: req.user!.role };
     if (!(await canManageSite(actor, current.siteId))) {
       res.status(403).json({ error: "Forbidden", message: "You can only edit shifts at sites you manage." });
@@ -1354,21 +1438,44 @@ router.put("/shifts/:id", ...requireSchedulingManage, async (req, res): Promise<
   }
   if (startTime) updates.startTime = new Date(startTime);
   if (endTime) updates.endTime = new Date(endTime);
+  if (requiredLicenseLevel !== undefined && [1, 2, 3, 4].includes(Number(requiredLicenseLevel))) {
+    updates.requiredLicenseLevel = Number(requiredLicenseLevel);
+  }
   if (!isSiteManager) {
     if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
     if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }
     if (hourlyRate !== undefined && payRate === undefined) { updates.payRate = String(hourlyRate); updates.hourlyRate = String(hourlyRate); }
     if (billableRate !== undefined && billRate === undefined) { updates.billRate = String(billableRate); updates.billableRate = String(billableRate); }
+  } else if (siteManagerMovedSite) {
+    // Site manager moved the shift to a different managed site: re-resolve
+    // pay/bill from the DESTINATION site's rate card for this shift's level
+    // (same card lookup as create), not the flat legacy default. Use the
+    // level being set in this same request if provided, else the shift's
+    // existing level.
+    const levelForLookup = (updates.requiredLicenseLevel as number | undefined) ?? currentLevel;
+    const resolved = await resolveSiteManagerDefaultRate(
+      siteId,
+      levelForLookup,
+      destDefaultPay,
+      destDefaultBill,
+    );
+    updates.payRate = String(resolved.pay);
+    updates.hourlyRate = String(resolved.pay);
+    updates.billRate = String(resolved.bill);
+    updates.billableRate = String(resolved.bill);
+    // FK deliberately dropped, not carried from `resolved` — a site manager's
+    // shift never carries the rate-card FK (parity with create), only the
+    // resolved numeric default. Also clears any FK the shift had at its old site.
+    updates.siteRateId = null;
   }
   if (status) updates.status = status;
   if (notes !== undefined) updates.notes = notes;
-  if (requiredLicenseLevel !== undefined && [1, 2, 3, 4].includes(Number(requiredLicenseLevel))) {
-    updates.requiredLicenseLevel = Number(requiredLicenseLevel);
-  }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
   // siteRateId points at a `site_rates` card that carries pay/bill rates, so it is
-  // finance metadata — site managers must never set it (parity with the rate guard above).
+  // finance metadata — site managers must never set it directly (parity with the rate
+  // guard above); the siteManagerMovedSite branch above is the one exception, where WE
+  // clear it server-side (never attach one) when the shift moves to a new site.
   if (!isSiteManager && siteRateId !== undefined) updates.siteRateId = siteRateId || null;
   // Allowlisted shift-type toggle (standard ↔ ppo_detail); anything else ignored.
   if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
@@ -1744,7 +1851,10 @@ router.post("/shifts/:id/notify-vacancy", ...requireDispatchManage, async (req, 
   res.json({ notifiedCount: targetIds.length, vacanciesRemaining });
 });
 
-router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res): Promise<void> => {
+// `idempotentWrite`: see POST /shifts. A re-sent assignment carrying the same
+// Idempotency-Key replays the original 201 rather than racing the duplicate
+// guard below (which would answer 409 and read as a refusal to the caller).
+router.post("/shifts/:id/assignments", requireSchedulingStaff, idempotentWrite, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { employeeId, overrideLicense } = req.body;
   if (!employeeId) { res.status(400).json({ error: "Bad Request", message: "employeeId required" }); return; }

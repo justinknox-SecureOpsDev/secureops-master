@@ -18,4 +18,7 @@ same dev database is also shared with other runs happening at the same time
 Read the failure's shape: the same file failing every time = real; a different
 unrelated file each attempt, each passing in isolation, or a count assertion
 inflated by rows nobody in this suite created = foreign-run pollution — re-run
-rather than editing the named test.
+rather than editing the named test. Already observed in this shape:
+`wsBroadcast`, the admin-portal `deepLinkFocus` animation-class assertion, the
+clock-in nearest-site geo test, invoice-number collisions, `analytics.test.ts`,
+and `agreementSigningAuthority.test.ts`.

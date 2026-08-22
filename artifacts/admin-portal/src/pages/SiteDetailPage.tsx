@@ -3,10 +3,13 @@ import QRCode from "qrcode";
 import { Link, useRoute, useLocation } from "wouter";
 import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api, fetchWithAuth } from "@/lib/api";
+import { api, fetchWithAuth, isStillProcessing, STILL_SAVING_MESSAGE } from "@/lib/api";
+import { useIdempotentIntent } from "@/lib/idempotentIntent";
 import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
+import { isFeatureEnabled } from "@/lib/brand";
+import { FeatureLockedNote } from "@/components/FeatureGate";
 import { RowFormDialog } from "@/components/RowFormDialog";
 import { ShiftDialog } from "@/components/ShiftDialog";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
@@ -303,6 +306,17 @@ export function SiteDetailPage() {
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
+  // The entry whose decision the server never confirmed: still running under
+  // its key when `api()` stopped waiting. A save in progress, not a refusal, so
+  // it is held apart from `teActionError` — the list is re-read (if it landed,
+  // the row now shows the decision) and the buttons stay usable, since pressing
+  // again reuses the key and can only replay, never approve twice.
+  const [teStillSavingId, setTeStillSavingId] = useState<string | null>(null);
+  // Approving an entry releases its hours to payroll and to the client
+  // invoice, so a second press must never be a second approval: one intent per
+  // (entry, decision) holds one idempotency key and the server replays the
+  // original decision instead of re-running it.
+  const teDecisionIntent = useIdempotentIntent();
   // Officer-edit review dialog (shared with the Payroll Board): approve/reject
   // on an officer-edited entry opens the recorded-vs-submitted diff first.
   const [teReviewEntry, setTeReviewEntry] = useState<TimeEntryRow | null>(null);
@@ -343,7 +357,7 @@ export function SiteDetailPage() {
   }, [siteId]);
 
   const loadCheckpoints = useCallback(async () => {
-    if (!siteId) return;
+    if (!siteId || !isFeatureEnabled("patrol")) return;
     try {
       const data = await api<{ checkpoints: Checkpoint[] }>(`/admin/sites/${siteId}/checkpoints`);
       setCheckpoints(data.checkpoints);
@@ -351,7 +365,7 @@ export function SiteDetailPage() {
   }, [siteId]);
 
   const loadScans = useCallback(async () => {
-    if (!siteId) return;
+    if (!siteId || !isFeatureEnabled("patrol")) return;
     setScansLoading(true);
     try {
       const data = await api<{ scans: ScanRow[] }>(`/admin/patrol/scans?siteId=${siteId}&limit=50`);
@@ -468,6 +482,7 @@ export function SiteDetailPage() {
       return false;
     }
     setTeActionError(null);
+    setTeStillSavingId(null);
     setTeActioningId(t.id);
     try {
       const body: { decision: "approved" | "rejected"; hoursWorked?: number } = { decision };
@@ -481,12 +496,22 @@ export function SiteDetailPage() {
         }
         body.hoursWorked = hours;
       }
-      await api(`/time-entries/${t.id}/approve`, { method: "POST", body });
+      await teDecisionIntent.run(`time-entry-decision:${t.id}:${decision}`, (idempotencyKey) =>
+        api(`/time-entries/${t.id}/approve`, { method: "POST", idempotencyKey, body }),
+      );
       setTeHoursEdits((e) => { const n = { ...e }; delete n[t.id]; return n; });
       await loadTimeEntries();
       return true;
     } catch (e) {
-      setTeActionError((e as Error).message);
+      if (isStillProcessing(e)) {
+        setTeStillSavingId(t.id);
+        // The decision may have landed while we were waiting on it — re-read
+        // the list so a completed approval shows itself instead of leaving the
+        // person to guess.
+        await loadTimeEntries();
+      } else {
+        setTeActionError((e as Error).message);
+      }
       return false;
     } finally {
       setTeActioningId(null);
@@ -947,135 +972,145 @@ export function SiteDetailPage() {
               <h2 className="text-lg font-semibold inline-flex items-center gap-2">
                 <QrCode className="w-4 h-4" /> Patrol checkpoints
               </h2>
-              <div className="text-xs text-muted-foreground">
-                Print each code as a QR or NFC tag. Officers scan it to log a patrol.
-              </div>
+              {isFeatureEnabled("patrol") && (
+                <div className="text-xs text-muted-foreground">
+                  Print each code as a QR or NFC tag. Officers scan it to log a patrol.
+                </div>
+              )}
             </div>
 
-            <div className="flex gap-2 mb-3">
-              <input
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="Checkpoint label (e.g. Main Entrance)"
-                className="flex-1 border rounded px-3 py-2 text-sm bg-background"
-                disabled={creating}
-              />
-              <Button size="sm" onClick={createCheckpoint} disabled={creating || !newLabel.trim()}>
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add
-              </Button>
-            </div>
-
-            {checkpoints.length === 0 ? (
-              <div className="text-sm text-muted-foreground border rounded p-4">
-                No checkpoints yet. Add one above to start logging patrol scans.
-              </div>
+            {!isFeatureEnabled("patrol") ? (
+              <FeatureLockedNote feature="patrol" />
             ) : (
-              <ResponsiveTable
-                data={checkpoints}
-                getRowKey={(c) => c.id}
-                columns={[
-                  {
-                    id: "label",
-                    header: "Label",
-                    mobile: "title",
-                    cell: (c) => c.label,
-                  },
-                  {
-                    id: "code",
-                    header: "Code",
-                    cell: (c) => c.code,
-                    tdClassName: "font-mono text-xs",
-                    mobileValueClassName: "font-mono text-xs",
-                  },
-                  {
-                    id: "status",
-                    header: "Status",
-                    mobile: "meta",
-                    cell: (c) => (
-                      <span className={c.isActive ? "text-emerald-600" : "text-muted-foreground"}>
-                        {c.isActive ? "Active" : "Disabled"}
-                      </span>
-                    ),
-                    mobileCell: (c) => (
-                      <span className={c.isActive ? "text-emerald-600 text-sm" : "text-muted-foreground text-sm"}>
-                        {c.isActive ? "Active" : "Disabled"}
-                      </span>
-                    ),
-                  },
-                  {
-                    id: "actions",
-                    header: "Actions",
-                    align: "right",
-                    mobile: "actions",
-                    cell: (c) => (
-                      <>
-                        <Button variant="ghost" size="sm" onClick={() => toggleActive(c)}>
-                          {c.isActive ? "Disable" : "Enable"}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => deleteCheckpoint(c)}>
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </Button>
-                      </>
-                    ),
-                    mobileCell: (c) => (
-                      <>
-                        <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => toggleActive(c)}>
-                          {c.isActive ? "Disable" : "Enable"}
-                        </Button>
-                        <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => deleteCheckpoint(c)}>
-                          <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Delete
-                        </Button>
-                      </>
-                    ),
-                  },
-                ]}
-              />
+              <>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    placeholder="Checkpoint label (e.g. Main Entrance)"
+                    className="flex-1 border rounded px-3 py-2 text-sm bg-background"
+                    disabled={creating}
+                  />
+                  <Button size="sm" onClick={createCheckpoint} disabled={creating || !newLabel.trim()}>
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                  </Button>
+                </div>
+
+                {checkpoints.length === 0 ? (
+                  <div className="text-sm text-muted-foreground border rounded p-4">
+                    No checkpoints yet. Add one above to start logging patrol scans.
+                  </div>
+                ) : (
+                  <ResponsiveTable
+                    data={checkpoints}
+                    getRowKey={(c) => c.id}
+                    columns={[
+                      {
+                        id: "label",
+                        header: "Label",
+                        mobile: "title",
+                        cell: (c) => c.label,
+                      },
+                      {
+                        id: "code",
+                        header: "Code",
+                        cell: (c) => c.code,
+                        tdClassName: "font-mono text-xs",
+                        mobileValueClassName: "font-mono text-xs",
+                      },
+                      {
+                        id: "status",
+                        header: "Status",
+                        mobile: "meta",
+                        cell: (c) => (
+                          <span className={c.isActive ? "text-emerald-600" : "text-muted-foreground"}>
+                            {c.isActive ? "Active" : "Disabled"}
+                          </span>
+                        ),
+                        mobileCell: (c) => (
+                          <span className={c.isActive ? "text-emerald-600 text-sm" : "text-muted-foreground text-sm"}>
+                            {c.isActive ? "Active" : "Disabled"}
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "actions",
+                        header: "Actions",
+                        align: "right",
+                        mobile: "actions",
+                        cell: (c) => (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => toggleActive(c)}>
+                              {c.isActive ? "Disable" : "Enable"}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => deleteCheckpoint(c)}>
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </Button>
+                          </>
+                        ),
+                        mobileCell: (c) => (
+                          <>
+                            <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => toggleActive(c)}>
+                              {c.isActive ? "Disable" : "Enable"}
+                            </Button>
+                            <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => deleteCheckpoint(c)}>
+                              <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Delete
+                            </Button>
+                          </>
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+              </>
             )}
           </section>
 
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold">Recent scans</h2>
-              <Button variant="outline" size="sm" onClick={loadScans} disabled={scansLoading}>
-                Refresh
-              </Button>
-            </div>
-            {scansLoading ? (
-              <div className="text-sm text-muted-foreground">Loading…</div>
-            ) : scans.length === 0 ? (
-              <div className="text-sm text-muted-foreground border rounded p-4">
-                No scans recorded at this site yet.
+          {isFeatureEnabled("patrol") && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">Recent scans</h2>
+                <Button variant="outline" size="sm" onClick={loadScans} disabled={scansLoading}>
+                  Refresh
+                </Button>
               </div>
-            ) : (
-              <ResponsiveTable
-                data={scans}
-                getRowKey={(s) => s.id}
-                columns={[
-                  {
-                    id: "when",
-                    header: "When",
-                    mobile: "meta",
-                    cell: (s) => fmt(s.scannedAt),
-                    tdClassName: "text-muted-foreground",
-                    mobileCell: (s) => (
-                      <span className="text-sm text-muted-foreground text-right">{fmt(s.scannedAt)}</span>
-                    ),
-                  },
-                  {
-                    id: "officer",
-                    header: "Officer",
-                    mobile: "title",
-                    cell: (s) => [s.firstName, s.lastName].filter(Boolean).join(" ") || "—",
-                  },
-                  {
-                    id: "checkpoint",
-                    header: "Checkpoint",
-                    cell: (s) => s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>,
-                  },
-                ]}
-              />
-            )}
-          </section>
+              {scansLoading ? (
+                <div className="text-sm text-muted-foreground">Loading…</div>
+              ) : scans.length === 0 ? (
+                <div className="text-sm text-muted-foreground border rounded p-4">
+                  No scans recorded at this site yet.
+                </div>
+              ) : (
+                <ResponsiveTable
+                  data={scans}
+                  getRowKey={(s) => s.id}
+                  columns={[
+                    {
+                      id: "when",
+                      header: "When",
+                      mobile: "meta",
+                      cell: (s) => fmt(s.scannedAt),
+                      tdClassName: "text-muted-foreground",
+                      mobileCell: (s) => (
+                        <span className="text-sm text-muted-foreground text-right">{fmt(s.scannedAt)}</span>
+                      ),
+                    },
+                    {
+                      id: "officer",
+                      header: "Officer",
+                      mobile: "title",
+                      cell: (s) => [s.firstName, s.lastName].filter(Boolean).join(" ") || "—",
+                    },
+                    {
+                      id: "checkpoint",
+                      header: "Checkpoint",
+                      cell: (s) => s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>,
+                    },
+                  ]}
+                />
+              )}
+            </section>
+          )}
 
           <section>
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -1123,8 +1158,17 @@ export function SiteDetailPage() {
             )}
 
             {teActionError && (
-              <div className="text-sm text-destructive border border-destructive/40 rounded p-3 mb-3">
+              <div
+                data-testid="time-entry-action-error"
+                className="text-sm text-destructive border border-destructive/40 rounded p-3 mb-3"
+              >
                 {teActionError}
+              </div>
+            )}
+
+            {teStillSavingId && (
+              <div role="status" className="text-sm text-muted-foreground border rounded p-3 mb-3">
+                {STILL_SAVING_MESSAGE}
               </div>
             )}
 

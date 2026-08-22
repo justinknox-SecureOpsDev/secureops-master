@@ -68,9 +68,12 @@ function StatusPill({ status }: { status: string | null }) {
 export function PayrollTransactionList() {
   const { user } = useAuth();
   // The per-record admin grid (the existing single-record screen) is
-  // requireAdmin server-side, so only offer the deep link to a role that can
-  // actually open it. Everyone else still gets the row detail inline.
-  const canOpenRecord = user?.role === "admin";
+  // requireAdmin server-side. An admin keeps using that deep link; anyone
+  // else who can see this list at all only got here via finance.transactions
+  // (see requireCompanyOwnerOrPermission on GET /payroll), which also gates
+  // GET/PUT /payroll/:id — so they open the same record on the narrower
+  // read/edit detail page instead of the admin grid.
+  const isAdmin = user?.role === "admin";
 
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,16 +140,15 @@ export function PayrollTransactionList() {
       header: "",
       align: "right",
       mobile: "actions",
-      cell: (r) =>
-        canOpenRecord ? (
-          <Link
-            href={`/tables/payroll_entries?focus=${r.id}`}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-            data-testid={`link-open-payroll-${r.id}`}
-          >
-            Open <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
-        ) : null,
+      cell: (r) => (
+        <Link
+          href={isAdmin ? `/tables/payroll_entries?focus=${r.id}` : `/payroll/${r.id}`}
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          data-testid={`link-open-payroll-${r.id}`}
+        >
+          Open <ExternalLink className="w-3.5 h-3.5" />
+        </Link>
+      ),
     },
   ];
 

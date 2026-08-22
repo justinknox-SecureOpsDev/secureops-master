@@ -46,6 +46,7 @@ export default function EmployeeChatScreen() {
         onSelectRoom={(id, name) =>
           router.push({ pathname: "/(employee)/chat/[id]", params: { id, name } })
         }
+        onOpenAiBot={() => router.push("/(employee)/chat/ai-bot")}
       />
     </FeatureGate>
   );

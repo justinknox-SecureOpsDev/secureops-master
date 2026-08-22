@@ -28,6 +28,7 @@
     "@types/react-dom": "~19.1.7",
     "@ungap/structured-clone": "^1.3.0",
     "@workspace/api-client-react": "workspace:*",
+    "@workspace/assistant-chat-client": "workspace:*",
     "@workspace/feature-keys": "workspace:*",
     "@workspace/permission-keys": "workspace:*",
     "@workspace/screen-names": "workspace:*",

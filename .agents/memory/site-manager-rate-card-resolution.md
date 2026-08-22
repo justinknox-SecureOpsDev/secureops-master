@@ -1,0 +1,23 @@
+---
+name: Site-manager shift rate resolution
+description: How site-manager-created/edited shifts must resolve their default pay/bill rate, and why the rate-card FK still stays null for them.
+---
+
+Site managers never supply pay/bill rates on a shift (client-supplied rate fields are ignored for them everywhere in `shifts.ts`), so every site-manager shift create/transfer path needs a server-side default. That default must come from the site's rate CARD (`site_rates`, keyed by `(siteId, licenseLevel, rateTier)` — edited on the site detail page), matched to the shift's `requiredLicenseLevel` with "lowest `rateTier` wins" (mirrors the admin portal's own `defaultRateForLevel` client logic), **not** the legacy flat `sites.defaultPayRate`/`defaultBillRate` columns. The legacy columns predate per-level cards and are now only a fallback for sites with zero card rows.
+
+**Why:** the flat site-level default is blind to license level (an L3 armed position would silently inherit the same number as L2 unarmed) and can drift from a card an admin has since edited, since nothing keeps the two in sync. This was reported as "the site rate card isn't being respected."
+
+A shared helper (`resolveSiteManagerDefaultRate` in `shifts.ts`) does this lookup and is called from all 4 places a site manager's shift can get a rate: `POST /shifts`, `POST /shifts/bulk-create`, `POST /shifts/repeat` (both its multi-position and legacy single-position branches), and `PUT /shifts/:id` when a manager moves a shift to a different managed site (re-resolve from the DESTINATION site + the shift's level, never carry the source site's numbers).
+
+**How to apply:** if you add a 5th site-manager-facing shift/position code path, route its rate default through this same helper — don't reintroduce a direct `site.defaultPayRate` read for a site-manager branch.
+
+One deliberate non-change: `shiftsTable.siteRateId` (the FK to the card row) stays forced to `null` for every site-manager-created/edited shift, even when the resolved numeric default came from a real card row. This is tested explicitly (`siteManagerScope.test.ts`: "site manager cannot set rate-card linkage") — the FK is finance-linkage metadata, and only admins may attach a shift to a specific card. Do not "fix" this to attach the FK for site managers; it's intentional, only the *value* is card-derived, not the *linkage*.
+
+Known NOT-yet-applied instances of the same legacy-default pattern (found but out of scope for the shift-creation fix, needs its own decision before touching): invoice generation bill-rate fallback (`lib/invoiceSync.ts`), subcontractor QR token bill-rate fallback (same file + `routes/subcontractor.ts`), client portal (`routes/clientPortal.ts`), analytics revenue fallback (`routes/analytics.ts`) — all fall back to `sites.defaultBillRate` instead of the per-level card.
+
+**Update — extended to the other 3 surfaces (invoicing, client-portal approval, analytics):** all three now try the per-level `site_rates` card (lowest tier wins, same rule) BEFORE the flat `sites.defaultBillRate`/`defaultPayRate`, mirroring the shift-creation resolver:
+- `lib/invoiceSync.ts`'s `collectInvoicePeriodEntries` — officer time-entry pricing resolves level from the linked shift's `requiredLicenseLevel`, falling back to the employee's own `siaLicenseLevel` for entries with no linked shift, then looks up the card; only entries with no card row at all fall through to the flat site default. `routes/invoices.ts`'s drill-down endpoint calls the same function so it inherited the fix automatically.
+- `routes/clientPortal.ts`'s coverage-request approval handler (`POST /admin/shift-requests/:id/approve`) previously applied ONE flat rate to every requested level (L2/L3/L4 alike) — the worst version of this bug, no per-level variance at all. Now resolves per level from the card and (since this is an admin-triggered path, unlike site-manager shifts) also sets the created shift's `siteRateId` FK when a card match exists.
+- `lib/analytics.ts`'s dashboard revenue calc (`priceEntry`) — same per-(site,level) card lookup, batched once per query range across all sites present, attached to each `EntryRow` as `cardBillRate` and tried between `shiftBillRate` and the flat `siteBillRate`.
+
+**Deliberately left unchanged:** subcontractor QR-token bill-rate fallback (in `invoiceSync.ts`'s subcontractor-entry block and `routes/subcontractor.ts`) still falls back straight to the flat site default. Subcontractors have no SIA license level, so no per-level card row could ever apply to them — the flat default is the correct design there, not an instance of this bug (see `subcontractor-qr-rates.md`).

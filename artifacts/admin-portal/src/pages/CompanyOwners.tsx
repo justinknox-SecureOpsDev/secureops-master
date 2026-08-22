@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -13,6 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { LoadFailedNotice } from "@/components/SettingsStatus";
 import { KeyRound, Loader2 } from "lucide-react";
 
 type OwnerRow = {
@@ -57,7 +58,15 @@ export default function CompanyOwnersPage() {
   if (q.isLoading) {
     return <div className="p-6"><Loader2 className="w-5 h-5 animate-spin" /></div>;
   }
-  if (q.isError) {
+
+  // A 403 is the server telling us plainly that the viewer isn't (or is no
+  // longer) a company owner — distinct from a transient read/refetch
+  // failure. The mutation's onSuccess triggers a background invalidation
+  // refetch right after a toggle; if THAT fails (network blip, 5xx), it must
+  // never be presented as "you lost owner access" — the toast already
+  // confirmed the toggle worked.
+  const isForbidden = q.error instanceof ApiError && q.error.status === 403;
+  if (isForbidden) {
     return (
       <div className="p-6 max-w-2xl">
         <Card>
@@ -66,6 +75,23 @@ export default function CompanyOwnersPage() {
             Owner access required. This page is restricted to existing company owners.
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // Any other read failure is unknown, not a refusal (dropped connection,
+  // 5xx, proxy hiccup) — see @/lib/settingsStatus. With no last-known rows to
+  // fall back on, say so plainly with a retry instead of guessing.
+  if (q.isError && !q.data) {
+    return (
+      <div className="p-6 max-w-2xl">
+        <LoadFailedNotice
+          label="company owners"
+          message="Couldn't load the company owners list — the server didn't respond."
+          hasLastKnown={false}
+          onRetry={() => void q.refetch()}
+          retrying={q.isFetching}
+        />
       </div>
     );
   }
@@ -87,6 +113,20 @@ export default function CompanyOwnersPage() {
           grant platform-level super-admin access.
         </p>
       </header>
+
+      {q.isError && (
+        // A background refetch failed (e.g. right after a toggle's
+        // invalidateQueries) but we still have the last-known rows — keep
+        // the table on screen instead of blanking it, per
+        // @/components/SettingsStatus.
+        <LoadFailedNotice
+          label="company owners"
+          message="Couldn't refresh the owners list — the server didn't respond."
+          hasLastKnown={true}
+          onRetry={() => void q.refetch()}
+          retrying={q.isFetching}
+        />
+      )}
 
       <Card>
         <CardHeader>

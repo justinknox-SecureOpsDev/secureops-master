@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, isDefiniteRefusal, isStillProcessing, STILL_SAVING_MESSAGE } from "@/lib/api";
+import { newIdempotencyKey, useIdempotentIntent } from "@/lib/idempotentIntent";
 import { useFkOptions } from "@/lib/fk";
 import { AlertTriangle } from "lucide-react";
 import {
@@ -74,6 +75,12 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The server can answer "an identical request under this key is still
+  // running" — the save is in progress, not refused. Held apart from `err` so
+  // it never renders as a failure over a write that is committing. The dialog
+  // stays open with its input intact and Save stays usable: pressing it again
+  // reuses the held key, so it can only replay the write, never duplicate it.
+  const [stillSaving, setStillSaving] = useState(false);
 
   // ── Single-position fields (edit mode only) ──
   const [requiredLicenseLevel, setRequiredLicenseLevel] = useState<number>(2);
@@ -89,9 +96,23 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
   const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
   const [ratesLoading, setRatesLoading] = useState(false);
 
+  // One save intent per opening of the dialog: a double-click (or a retry of
+  // an interrupted save) is the same intent and reuses one idempotency key, so
+  // it can only ever produce one set of shifts. Re-opening the dialog is a new
+  // intent, so creating the same shift again on purpose still works.
+  const intent = useIdempotentIntent();
+  const saveIntentId = useRef<string>("");
+  // …with one exception: a save whose outcome we never learned. Closing the
+  // dialog (Cancel, Escape, the X) does not stop a write the server already
+  // has. Minting a fresh intent on the next open would hand that same create a
+  // second key, which is a second set of shifts. So the intent survives until
+  // something settles it.
+  const saveUnsettled = useRef(false);
+
   // Reset everything when the dialog opens / initial changes.
   useEffect(() => {
     if (!open) return;
+    if (!saveUnsettled.current) saveIntentId.current = `shift-save:${newIdempotencyKey()}`;
     setTitle(initial?.title ?? "");
     setSiteId(initial?.siteId ?? null);
     setStartTime(toLocalInput(initial?.startTime));
@@ -99,6 +120,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
     setShiftType(initial?.shiftType ?? "standard");
     setNotes(initial?.notes ?? "");
     setErr(null);
+    setStillSaving(false);
 
     // Edit mode single-position state.
     setRequiredLicenseLevel(initial?.requiredLicenseLevel ?? 2);
@@ -162,12 +184,14 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
 
   async function submit() {
     setErr(null);
+    setStillSaving(false);
     if (!title.trim()) { setErr("Title is required"); return; }
     if (!startTime || !endTime) { setErr("Start and end time are required"); return; }
     if (new Date(endTime) <= new Date(startTime)) { setErr("End time must be after start time"); return; }
     if (hasDuplicates) { setErr("Remove duplicate positions before saving"); return; }
 
     setSubmitting(true);
+    saveUnsettled.current = true;
     try {
       if (isEdit) {
         // Edit: single-position update (unchanged path).
@@ -204,22 +228,33 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
             siteRateId: r.siteRateId || null,
           };
         });
-        await api(`/shifts/bulk-create`, {
-          method: "POST",
-          body: JSON.stringify({
-            title: title.trim(),
-            siteId: siteId || null,
-            startTime: new Date(startTime).toISOString(),
-            endTime: new Date(endTime).toISOString(),
-            notes: notes.trim() || null,
-            shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
-            positions,
+        await intent.run(saveIntentId.current, (idempotencyKey) =>
+          api(`/shifts/bulk-create`, {
+            method: "POST",
+            idempotencyKey,
+            body: JSON.stringify({
+              title: title.trim(),
+              siteId: siteId || null,
+              startTime: new Date(startTime).toISOString(),
+              endTime: new Date(endTime).toISOString(),
+              notes: notes.trim() || null,
+              shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
+              positions,
+            }),
           }),
-        });
+        );
       }
+      saveUnsettled.current = false;
       onSaved();
     } catch (e) {
-      setErr((e as Error).message);
+      if (isStillProcessing(e)) setStillSaving(true);
+      else setErr((e as Error).message);
+      // A refusal from the route proves the write did not happen, so this
+      // intent is over and the next open starts a fresh one. Anything else —
+      // still processing, a 5xx, a dropped connection — leaves it unknown, and
+      // the key has to survive so the next submit can find out rather than
+      // create a second set of shifts.
+      if (isDefiniteRefusal(e)) saveUnsettled.current = false;
     } finally {
       setSubmitting(false);
     }
@@ -466,6 +501,12 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
             </div>
           )}
 
+          {stillSaving && (
+            <div role="status" className="text-sm text-muted-foreground border rounded px-3 py-2">
+              {STILL_SAVING_MESSAGE}
+            </div>
+          )}
+
           {err && (
             <div className="text-sm text-destructive border border-destructive/40 rounded px-3 py-2">
               {err}
@@ -474,7 +515,11 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
+          {/* Cancel stays live while saving. A save can now sit waiting on the
+              server for a while, and a dialog that cannot be closed for that
+              long is a trap; closing loses nothing, since the intent key is
+              held and re-submitting replays rather than duplicates. */}
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={submitting || hasDuplicates}>
             {submitting
               ? "Saving…"

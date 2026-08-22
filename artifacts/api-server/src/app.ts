@@ -96,7 +96,11 @@ const CSP_DIRECTIVES = {
   // The agreement review & sign page embeds the uploaded agreement PDF. It is
   // fetched with the admin's bearer token and handed to the <iframe> as a
   // blob: URL, so signing shows the actual document rather than a link.
-  frameSrc: ["'self'", "blob:"],
+  // The public onboarding page and the policy list also embed policy/SOP
+  // documents directly via their signed object-storage download URL (no
+  // bearer token available/needed there), so https: must stay allowed here
+  // too — mirrors imgSrc's https: allowance for the same signed downloads.
+  frameSrc: ["'self'", "blob:", "https:"],
   frameAncestors: ["'none'"],
   baseUri: ["'self'"],
   formAction: ["'self'"],

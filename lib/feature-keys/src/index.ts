@@ -35,6 +35,7 @@ export const FEATURE_KEYS = [
   "patrol",
   "availability",
   "officerShares",
+  "assistant",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

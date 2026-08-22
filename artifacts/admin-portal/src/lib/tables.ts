@@ -5,6 +5,8 @@
  * `/admin/tables/:table` endpoint registry in `artifacts/api-server/src/routes/admin.ts`.
  */
 
+import type { FeatureKey } from "@/lib/brand";
+
 /** Singularize a plural label for "Add {X}" / "Edit {X}" buttons. */
 export function singularize(label: string): string {
   if (/ies$/i.test(label)) return label.replace(/ies$/i, "y");
@@ -75,6 +77,12 @@ export type Field = {
   importExample?: string;
   /** Descriptive text rendered below the field in the edit dialog. */
   helpText?: string;
+  /** Plan feature this field belongs to. When the deployment's plan doesn't
+   *  include it, the field is skipped everywhere: grid column, edit dialog,
+   *  and Excel import (template + mapping + write). Unlike `TABLE_FEATURE`
+   *  (which gates an entire table/route), this hides a single field within
+   *  an otherwise-ungated table. */
+  feature?: FeatureKey;
   /** Grid-only computed column. The field is automatically skipped by the
    *  row edit dialog, the import wizard (template + mapping + write paths)
    *  and never sent to the API. The grid renders it by resolving `fromField`
@@ -321,7 +329,7 @@ export const TABLES: TableDescriptor[] = [
       { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true, section: "Personal Documents" },
       { key: "cvKey", label: "Resume", type: "fileKey", hiddenInGrid: true },
       { key: "trainingCertificateKeys", label: "Training Certificates", type: "fileKeyList", hiddenInGrid: true },
-      { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true, importExample: '{"mon":["am","pm"],"tue":["pm"],"wed":[],"thu":["am","pm","night"],"fri":["night"],"sat":["pm","night"],"sun":[]}' },
+      { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true, feature: "availability", importExample: '{"mon":["am","pm"],"tue":["pm"],"wed":[],"thu":["am","pm","night"],"fri":["night"],"sat":["pm","night"],"sun":[]}' },
       // --- Emergency contact ---
       { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true, section: "Emergency Contact", importExample: "John Doe" },
       { key: "emergencyContactRelationship", label: "Emergency Relationship", type: "text", hiddenInGrid: true, importExample: "Spouse" },

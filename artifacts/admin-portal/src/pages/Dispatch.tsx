@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, isStillProcessing, STILL_SAVING_MESSAGE } from "@/lib/api";
+import { useIdempotentIntent } from "@/lib/idempotentIntent";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -57,6 +58,11 @@ type StatusRow = {
   clockInTime?: string;
   clockOutTime?: string;
   timeEntryId?: string;
+  // Only set on onDuty rows — see STUCK_SHIFT_GRACE_HOURS/STUCK_WALKUP_HOURS
+  // in dispatch.ts. `stuck` flags an open entry the auto-clock-out sweep
+  // should have already closed but didn't (e.g. the site has it disabled).
+  stuck?: boolean;
+  hoursOpen?: number;
 };
 
 type StatusBoard = {
@@ -1314,6 +1320,8 @@ function StatusBoardPanel({
     scheduled: data?.scheduled.length ?? 0,
   }), [data]);
 
+  const stuckCount = useMemo(() => data?.onDuty.filter((r) => r.stuck).length ?? 0, [data]);
+
   // Admin-only on-behalf clock control. We track the busy row id so only the
   // tapped button shows a spinner while the others stay live.
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -1348,6 +1356,23 @@ function StatusBoardPanel({
       }
     : {};
 
+  // Closing a STUCK entry reuses PATCH /time-entries/:id/clock-out (the same
+  // route the Payroll Board's "missing clock-out" fix uses) instead of the
+  // dispatch on-behalf clock-out above — it snaps a shift-linked entry to its
+  // scheduled end (so hours aren't inflated by however long it sat stuck)
+  // and is audit-logged with who closed it.
+  const [closeTarget, setCloseTarget] = useState<StatusRow | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const closeStuck = useMutation({
+    mutationFn: (r: StatusRow) =>
+      api(`/time-entries/${r.timeEntryId}/clock-out`, {
+        method: "PATCH",
+        body: r.shiftId ? { useShiftEnd: true } : { clockOutTime: new Date().toISOString() },
+      }),
+    onSuccess: () => { setCloseTarget(null); onChange?.(); },
+    onError: (e) => setCloseError(e instanceof Error ? e.message : "Could not close this shift."),
+  });
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -1363,17 +1388,29 @@ function StatusBoardPanel({
       <CardContent>
         <InlineError error={error} />
         {loading && <div className="text-sm opacity-60">Loading…</div>}
+        {!loading && data && stuckCount > 0 && (
+          <div className="mb-3 flex items-center gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              {stuckCount} {stuckCount === 1 ? "officer has" : "officers have"} a shift open well past when it should
+              have ended, blocking their next clock-in. See the "On duty" tab below to close {stuckCount === 1 ? "it" : "them"}.
+            </span>
+          </div>
+        )}
         {!loading && data && (
           <Tabs defaultValue="onDuty">
             <TabsList className="grid grid-cols-6 w-full">
-              <TabsTrigger value="onDuty">On duty<Pill n={counts.onDuty} tone="ok" /></TabsTrigger>
+              <TabsTrigger value="onDuty">On duty<Pill n={counts.onDuty} tone={stuckCount > 0 ? "bad" : "ok"} /></TabsTrigger>
               <TabsTrigger value="late">Late<Pill n={counts.late} tone="warn" /></TabsTrigger>
               <TabsTrigger value="noShow">No show<Pill n={counts.noShow} tone="bad" /></TabsTrigger>
               <TabsTrigger value="earlyOut">Early out<Pill n={counts.earlyOut} tone="warn" /></TabsTrigger>
               <TabsTrigger value="completed">Completed<Pill n={counts.completed} tone="ok" /></TabsTrigger>
               <TabsTrigger value="scheduled">Scheduled<Pill n={counts.scheduled} tone="muted" /></TabsTrigger>
             </TabsList>
-            <BucketTab value="onDuty" rows={data.onDuty} emptyMsg="No one clocked in." showClockIn clockAction="out" {...clockProps} />
+            <BucketTab
+              value="onDuty" rows={data.onDuty} emptyMsg="No one clocked in." showClockIn clockAction="out" {...clockProps}
+              onCloseStuck={isAdmin ? (r: StatusRow) => { setCloseError(null); setCloseTarget(r); } : undefined}
+            />
             <BucketTab value="late" rows={data.late} emptyMsg="No late officers." showMinutesLate clockAction="in" {...clockProps} />
             <BucketTab value="noShow" rows={data.noShow} emptyMsg="No no-shows." showMinutesLate clockAction="in" {...clockProps} />
             <BucketTab value="earlyOut" rows={data.earlyOut} emptyMsg="No early clock-outs." showMinutesEarly />
@@ -1383,6 +1420,32 @@ function StatusBoardPanel({
         )}
         {clockError && <div className="mt-2 text-xs text-red-700">{clockError}</div>}
       </CardContent>
+      <Dialog open={!!closeTarget} onOpenChange={(o) => { if (!o) { setCloseTarget(null); setCloseError(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close {closeTarget?.officerName}'s stuck shift?</DialogTitle>
+            <DialogDescription>
+              This officer has been clocked in for {closeTarget?.hoursOpen}h without clocking out, which is blocking
+              their next clock-in.{" "}
+              {closeTarget?.shiftId
+                ? "We'll close it at the shift's scheduled end time, matching the Payroll Board's fix-clock-out."
+                : "This entry has no shift attached, so we'll close it using the current time."}
+            </DialogDescription>
+          </DialogHeader>
+          {closeError && <div className="text-xs text-red-700">{closeError}</div>}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setCloseTarget(null); setCloseError(null); }}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={closeStuck.isPending}
+              onClick={() => closeTarget && closeStuck.mutate(closeTarget)}
+            >
+              {closeStuck.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Close shift
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -1399,22 +1462,29 @@ function Pill({ n, tone }: { n: number; tone: "ok" | "warn" | "bad" | "muted" })
 
 function BucketTab({
   value, rows, emptyMsg, showMinutesLate, showMinutesEarly, showClockIn, showClockOut,
-  isAdmin, clockAction, pendingId, onClockIn, onClockOut,
+  isAdmin, clockAction, pendingId, onClockIn, onClockOut, onCloseStuck,
 }: {
   value: string; rows: StatusRow[]; emptyMsg: string;
   showMinutesLate?: boolean; showMinutesEarly?: boolean; showClockIn?: boolean;
   showClockOut?: boolean;
   isAdmin?: boolean; clockAction?: "in" | "out"; pendingId?: string | null;
   onClockIn?: (r: StatusRow) => void; onClockOut?: (r: StatusRow) => void;
+  onCloseStuck?: (r: StatusRow) => void;
 }) {
   return (
     <TabsContent value={value} className="mt-3 max-h-72 overflow-y-auto space-y-1">
       {rows.length === 0 ? (
         <div className="text-sm opacity-60 py-4 text-center">{emptyMsg}</div>
       ) : rows.map((r) => (
-        <div key={r.assignmentId} className="flex items-center gap-2 text-sm rounded border bg-card px-3 py-2">
+        <div
+          key={r.assignmentId}
+          className={`flex items-center gap-2 text-sm rounded border bg-card px-3 py-2 ${r.stuck ? "border-red-300" : ""}`}
+        >
           <div className="flex-1 min-w-0">
-            <div className="font-medium truncate">{r.officerName}</div>
+            <div className="font-medium truncate flex items-center gap-1.5">
+              {r.officerName}
+              {r.stuck && <Badge className="bg-red-600 text-white">Stuck · {r.hoursOpen}h</Badge>}
+            </div>
             <div className="text-xs opacity-70 truncate">
               {r.siteName ?? "—"} · {fmtTime(r.startTime)}–{fmtTime(r.endTime)}
             </div>
@@ -1429,6 +1499,14 @@ function BucketTab({
               <Badge className="bg-orange-500 text-white">{r.minutesEarly}m early</Badge>
             )}
           </div>
+          {r.stuck && onCloseStuck && (
+            <Button
+              size="sm" variant="destructive" className="h-7 text-xs"
+              onClick={() => onCloseStuck(r)}
+            >
+              Close shift
+            </Button>
+          )}
           {isAdmin && clockAction === "in" && onClockIn && (
             <Button
               size="sm" variant="outline" className="h-7 text-xs"
@@ -1438,7 +1516,7 @@ function BucketTab({
               {pendingId === r.assignmentId ? "…" : "Clock in"}
             </Button>
           )}
-          {isAdmin && clockAction === "out" && onClockOut && (
+          {isAdmin && clockAction === "out" && !r.stuck && onClockOut && (
             <Button
               size="sm" variant="outline" className="h-7 text-xs"
               disabled={pendingId === r.assignmentId}
@@ -1478,6 +1556,11 @@ function OpenShiftsPanel({
   const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
   const [assigningShiftId, setAssigningShiftId] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
+  // The shift whose assignment the server never confirmed: still running under
+  // its key when `api()` stopped waiting. A save in progress, not a refusal, so
+  // it never becomes a `dropError` — the board is refreshed and dropping again
+  // stays safe, since the same key can only replay, never assign twice.
+  const [stillSavingShiftId, setStillSavingShiftId] = useState<string | null>(null);
 
   // Deselect if the currently-selected shift gets fully staffed and leaves the list.
   useEffect(() => {
@@ -1498,15 +1581,34 @@ function OpenShiftsPanel({
     staleTime: 30_000,
   });
 
+  // One intent per (shift, officer): a repeated drop of the same officer onto
+  // the same shift reuses its idempotency key and replays the first
+  // assignment rather than creating a second one.
+  const intent = useIdempotentIntent();
   const assignMutation = useMutation({
     mutationFn: ({ shiftId, employeeId }: { shiftId: string; employeeId: string }) =>
-      api(`/shifts/${shiftId}/assignments`, { method: "POST", body: { employeeId, status: "accepted" } }),
+      intent.run(`assign:${shiftId}:${employeeId}`, (idempotencyKey) =>
+        api(`/shifts/${shiftId}/assignments`, {
+          method: "POST",
+          idempotencyKey,
+          body: { employeeId, status: "accepted" },
+        }),
+      ),
     onSuccess: () => {
       onChange();
       // Refresh the officer roster so the just-assigned officer disappears.
       qc.invalidateQueries({ queryKey: ["dispatch", "assign-nearest", selectedShiftId] });
     },
-    onError: (e) => setDropError(e instanceof Error ? e.message : "Could not assign officer."),
+    onError: (e, vars) => {
+      if (isStillProcessing(e)) {
+        setStillSavingShiftId(vars.shiftId);
+        // It may have landed while we waited — refresh so a completed
+        // assignment shows itself on the board rather than staying invisible.
+        onChange();
+      } else {
+        setDropError(e instanceof Error ? e.message : "Could not assign officer.");
+      }
+    },
     onSettled: () => setAssigningShiftId(null),
   });
 
@@ -1556,6 +1658,7 @@ function OpenShiftsPanel({
         setDropError(`${officer.name} doesn't meet the license requirement. Use "Assign" to override.`);
         return;
       }
+      setStillSavingShiftId(null);
       setAssigningShiftId(shiftId);
       assignMutation.mutate({ shiftId, employeeId: officer.userId });
     } catch {
@@ -1598,6 +1701,11 @@ function OpenShiftsPanel({
             >×</button>
           </div>
         )}
+        {stillSavingShiftId && (
+          <div role="status" className="mb-3 rounded border bg-muted/40 text-muted-foreground text-xs px-3 py-2">
+            {STILL_SAVING_MESSAGE}
+          </div>
+        )}
         {loading && <div className="text-sm opacity-60">Loading…</div>}
         {!loading && !error && data.length === 0 && (
           <div className="text-sm opacity-60">All shifts in the next 72h are filled.</div>
@@ -1610,6 +1718,7 @@ function OpenShiftsPanel({
                 const isSelected = shift.id === selectedShiftId;
                 const isDragOver = shift.id === dragOverShiftId;
                 const isAssigning = shift.id === assigningShiftId;
+                const isStillSaving = shift.id === stillSavingShiftId;
                 const isUnreleased = !!shift.claimableFrom && new Date(shift.claimableFrom).getTime() > Date.now();
                 return (
                   <div
@@ -1677,8 +1786,13 @@ function OpenShiftsPanel({
                           </div>
                         )}
                         {isAssigning && (
-                          <div className="text-xs text-brand-gold font-medium mt-1">
+                          <div role="status" className="text-xs text-brand-gold font-medium mt-1">
                             <Loader2 className="w-3 h-3 inline animate-spin mr-1" />Assigning…
+                          </div>
+                        )}
+                        {!isAssigning && isStillSaving && (
+                          <div className="text-xs text-muted-foreground font-medium mt-1">
+                            Still saving — not confirmed yet
                           </div>
                         )}
                       </div>

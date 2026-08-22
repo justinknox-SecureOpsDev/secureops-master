@@ -79,6 +79,7 @@ Why this is the whole ballgame: a fork that carries its own commits on shared fi
    - every tracked file whose content differs from that revision, **listed by path**. The customer's `.replit` is the one expected, allowed difference; anything else means the fork carries local code.
    - any leftover merge-conflict markers in tracked text files.
    - whether the environment still carries the customer's own `ORG_CODE` (not the master's `wcsgi`), with no `ORG_DIRECTORY` and no `EXPO_TOKEN`.
+   - a **Pre-publish data** section: whether the database it is pointed at already holds rows that would violate a uniqueness rule declared in the incoming schema. Here it is reading their dev database; step 7 is where you aim the same command at their **production** database, which is the one a publish can destroy.
 
    It prints every finding at once and exits non-zero on any `FAIL`. **Do not continue past a FAIL.** Shared-code differences or conflict markers here mean the fork has drifted — go to "Recovering a fork that has already drifted" below; do not patch the listed files by hand.
 
@@ -96,16 +97,55 @@ Why this is the whole ballgame: a fork that carries its own commits on shared fi
    ```
    Run the integrity check a second time here, after everything else is done. The install, the schema push, or a stray edit can dirty the tree between the merge and the publish, and a spliced route file sails through the first two commands.
 
-7. **Republish (Reserved VM).** This is what migrates their **production** database. Additive changes (new nullable columns, new columns with defaults, new indexes) apply safely. A schema change that adds a *unique constraint* to a table that already has rows can fail validation or force a destructive rewrite — check the release notes for the batch before publishing, and never run DDL at boot.
+7. **Pre-publish data check — the one that protects their live tables. Run it against their PRODUCTION database, not just dev:**
 
-8. **Verify against their live address and fleet status:**
+   > **The general rule: adding a uniqueness rule to a populated production table is the single most dangerous migration in this stack.** Everything else in a normal update is additive and safe. This one shape is the one that has already destroyed live data.
+
+   Publishing does not compare schema *files*. It diffs the **dev database** against the **prod database** and applies the result *before* the build. When the incoming schema adds a uniqueness rule (a unique index, a table `unique(...)` constraint, or a column-level `.unique()`) and the customer's production table already holds rows that break it, that diff can resolve as `TRUNCATE ... CASCADE`. In July 2026 exactly that wiped four populated production tables — `site_rates`, `shifts`, `shift_assignments`, `time_entries` — and needed a support-run point-in-time restore. The customer had no warning, and neither did the operator.
+
+   Nobody verifies a customer's data by hand, so check it:
+
+   ```bash
+   # a) the tenant's DEV database (this is what publish diffs FROM)
+   pnpm --filter @workspace/scripts run check-fork-integrity
+
+   # b) the tenant's PROD database (this is what publish rewrites)
+   OVERRIDE_DATABASE_URL='<their production connection string>' \
+     pnpm --filter @workspace/scripts run check-fork-integrity
+   ```
+
+   The **Pre-publish data** section of the output enumerates every uniqueness rule declared in `lib/db/src/schema/` and asks that database whether it already holds rows the rule would reject — honouring partial `WHERE` predicates and Postgres NULL semantics. It issues read-only `SELECT`s only, so pointing it at production is safe. A violation is a **FAIL**, not a warning, and names the table, the index/constraint name, and how many conflicting groups exist:
+
+   ```
+   Pre-publish data
+     [FAIL] no existing rows violate a uniqueness rule declared in the schema
+            • public.time_entries  time_entries_one_open_per_employee_uniq
+              [unique index on (employee_id) WHERE clock_out_time IS NULL]
+              — 3 conflicting group(s), 7 row(s)
+   ```
+
+   Note that run (b) fails the git/environment sections when you run it from the master repl — that is expected; what you are reading is the **Pre-publish data** section.
+
+   **The check fails closed.** A rule it could not evaluate — because the connecting role has no `SELECT` on that table, or the query errored — is a `FAIL` too, not a warning. "We could not tell" is not a pass: the rule you skipped is exactly the one that could rewrite a populated table. Get an affirmative answer for every rule before you continue.
+
+   **If it fails against prod, do NOT publish.** For each rule listed:
+   1. **Dedupe the prod rows.** `GROUP BY` the listed key columns with `HAVING count(*) > 1` in their prod Database pane, then merge or delete until nothing is returned. (For the open-time-entry rule that means closing out officers who have been left with two open clock-ins.)
+   2. **Re-run the check against prod** and confirm the section is green.
+   3. **Pre-create the rule in the prod Database pane yourself, with the exact name from the output** — e.g. `CREATE UNIQUE INDEX time_entries_one_open_per_employee_uniq ON time_entries (employee_id) WHERE clock_out_time IS NULL;`. Now the publish diff for that table is **empty**, so the migration has nothing to rewrite. For a table-level `unique(...)` constraint use `ALTER TABLE ... ADD CONSTRAINT <exact name> UNIQUE (...)` instead — drizzle-kit matches those in `pg_constraint`, and a bare index would not be recognised.
+   4. Only then continue to step 8.
+
+   Never fix this by running DDL at server boot: a boot-time writer racing the publish migration is what turned the July 2026 incident into a wipe rather than a failed deploy.
+
+8. **Republish (Reserved VM).** This is what migrates their **production** database. Additive changes (new nullable columns, new columns with defaults, new non-unique indexes) apply safely. Uniqueness rules are the exception, and step 7 is what clears them — do not skip it because "the batch looked additive".
+
+9. **Verify against their live address and fleet status:**
    ```bash
    curl -s https://<their-address>/api/version      # build id should change
    curl -s https://<their-address>/api/brand        # still their name/colors
    ```
     Then sign in to `https://<their-address>/admin-portal/`, confirm no amber "degraded configuration" banner, and spot-check whatever the batch added. A brand-new endpoint answering `401` instead of `404` is the quick proof it shipped. In the master Fleet Control Plane, click **Poll now** and confirm the customer shows **up to date** against the automatically recorded master build. If it remains **behind**, the pull or republish did not reach the live backend; **never current** means it has not yet reported this master build.
 
-9. **Re-run the config preflight** from a shell in the customer's repl:
+10. **Re-run the config preflight** from a shell in the customer's repl:
    ```bash
    pnpm --filter @workspace/scripts run check-tenant-config
    ```
@@ -186,12 +226,20 @@ If an update goes wrong in a customer repl, roll that repl back to its checkpoin
 ## Quick reference
 
 Master: merge work → `git push github main`.
-Customer: `git fetch upstream` → `git merge upstream/main` → keep their `.replit` env blocks → **fork-integrity check** → `pnpm install` → `db push` → typecheck/test → **fork-integrity check again** → republish → verify `/api/version` → Fleet Control Plane says **up to date** → config preflight.
+Customer: `git fetch upstream` → `git merge upstream/main` → keep their `.replit` env blocks → **fork-integrity check** → `pnpm install` → `db push` → typecheck/test → **fork-integrity check again** → **pre-publish data check against PROD** → republish → verify `/api/version` → Fleet Control Plane says **up to date** → config preflight.
 
 Both checks, run from a shell in the CUSTOMER's repl:
 ```bash
-pnpm --filter @workspace/scripts run check-fork-integrity   # is this fork an exact copy of the master revision it claims?
+pnpm --filter @workspace/scripts run check-fork-integrity   # is this fork an exact copy of the master revision it claims, and is its data safe to publish?
 pnpm --filter @workspace/scripts run check-tenant-config     # is this tenant's own config complete?
 ```
+
+And once more aimed at their **production** database before publishing — read-only, and the only thing standing between a new uniqueness rule and a `TRUNCATE ... CASCADE`:
+```bash
+OVERRIDE_DATABASE_URL='<their production connection string>' \
+  pnpm --filter @workspace/scripts run check-fork-integrity   # read the "Pre-publish data" section
+```
+
+Adding a uniqueness rule to a populated production table is the single most dangerous migration in this stack. Dedupe prod and pre-create the identically-named index there first, so the publish diff for that table is empty.
 
 Never run agent tasks or hand-edit code in a customer repl. A conflict in shared code means `git merge --abort` and "Recovering a fork that has already drifted" — never a hand resolution.

@@ -10,6 +10,7 @@ import {
 import { useFkOptions, invalidateFk } from "@/lib/fk";
 import { toFormValue, fromFormValue } from "@/lib/format";
 import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
+import { isFeatureEnabled } from "@/lib/brand";
 import { api, ApiError, fetchWithAuth } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
@@ -280,7 +281,9 @@ export function RowFormDialog({
 }) {
   const lockedSet = useMemo(() => new Set(lockedFields ?? []), [lockedFields]);
   const editable = useMemo(
-    () => descriptor.fields.filter((f) => !f.readonly && !f.derived),
+    () => descriptor.fields.filter(
+      (f) => !f.readonly && !f.derived && (!f.feature || isFeatureEnabled(f.feature)),
+    ),
     [descriptor],
   );
   const [values, setValues] = useState<Record<string, string>>({});

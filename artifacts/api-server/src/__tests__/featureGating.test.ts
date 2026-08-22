@@ -67,6 +67,7 @@ const FEATURE_ENDPOINTS: Record<FeatureKey, { method: "get" | "post"; path: stri
   patrol: { method: "get", path: "/api/admin/patrol/scans" },
   availability: { method: "get", path: "/api/me/availability" },
   officerShares: { method: "get", path: "/api/admin/employee-shares" },
+  assistant: { method: "get", path: "/api/assistant/status" },
 };
 
 const TAG = `feature-gate-test-${randomUUID().slice(0, 8)}`;
@@ -180,6 +181,10 @@ const CORE_UNGATED_ROUTERS = new Set<string>([
   "clientPortalRouter",
   "subcontractorPayRunRouter",
   "subcontractorRouter",
+  // Subcontractor (vendor) self-service portal — same footing as
+  // clientPortalRouter above: an external-party account type, not a
+  // paid/optional product tier.
+  "subcontractorPortalRouter",
   "schedulerWebhookRouter",
   "schedulerAdminRouter",
   "controlPlaneRouter",
@@ -240,6 +245,7 @@ const SELF_GATED_ROUTERS = new Set<string>([
   "exportsRouter",
   "radioRouter",
   "dispatchRouter",
+  "assistantRouter",
 ]);
 
 /**

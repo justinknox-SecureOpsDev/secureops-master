@@ -14,8 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 type TierKey = "starter" | "professional" | "enterprise";
 
 const TIER_DISABLED: Record<TierKey, string[]> = {
-  starter: ["chat", "radio", "incidents", "invoicing", "payroll", "hr", "policies", "swapRequests", "licenseRenewals", "dar", "exports", "trainings", "patrol", "availability", "officerShares"],
-  professional: ["radio", "invoicing", "payroll", "hr", "trainings", "exports", "officerShares"],
+  starter: ["chat", "radio", "incidents", "invoicing", "payroll", "hr", "policies", "swapRequests", "licenseRenewals", "dar", "exports", "trainings", "patrol", "availability", "officerShares", "assistant"],
+  professional: ["radio", "invoicing", "payroll", "hr", "trainings", "exports", "officerShares", "assistant"],
   enterprise: [],
 };
 
@@ -199,6 +199,7 @@ const LABELS: Record<string, string> = {
   patrol: "Patrol checkpoints",
   availability: "Officer availability",
   officerShares: "Officer profile share links",
+  assistant: "Secure Ops AI Bot (portal help + efficiency suggestions)",
 };
 
 export default function PlatformFeaturesPage() {

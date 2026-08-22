@@ -15,6 +15,64 @@ export class ApiError extends Error {
 }
 
 /**
+ * Header the API reads for replay protection on writes that are not naturally
+ * idempotent (create shift, roster an officer, approve a time entry).
+ *
+ * The server records the first response against the key; a later request
+ * carrying the SAME key is answered from that record instead of running the
+ * route again. Keys therefore belong to a *user intent*, not to a request —
+ * see `useIdempotentIntent` in lib/idempotentIntent.ts.
+ */
+export const IDEMPOTENCY_HEADER = "Idempotency-Key";
+
+/**
+ * `code` the API stamps on the 409 that means "an identical keyed request is
+ * still running" (see api-server/src/lib/idempotency.ts).
+ *
+ * Every other 409 a route can raise is a genuine refusal — already assigned,
+ * already fully staffed, already paid — where nothing is happening and the
+ * person has to change something. This one is the opposite: their write is in
+ * progress at that very moment. Told apart by the code, never by the prose.
+ */
+export const IDEMPOTENT_IN_FLIGHT_CODE = "idempotency_in_flight";
+
+/**
+ * True when a rejected write is not a failure but an action still being saved:
+ * the server has an identical keyed request in flight and has not finished it
+ * yet.
+ *
+ * Surfaces must render this as pending, not as an error. "Could not assign
+ * officer" next to a button, at the moment the assignment is committing, is
+ * what sends someone off to press again or hunt for the record.
+ */
+export function isStillProcessing(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  return (err.data as { code?: unknown } | null)?.code === IDEMPOTENT_IN_FLIGHT_CODE;
+}
+
+/**
+ * What to tell someone whose action is still being saved. Deliberately not
+ * error-shaped: it states what is true (it is running, it was not repeated)
+ * and asks for nothing.
+ */
+/**
+ * True when the server definitively refused the request — a 4xx raised by the
+ * route itself, which proves the write did not happen.
+ *
+ * Excludes the in-flight 409 (that write is running), 429 (a hosting-layer
+ * throttle, not a verdict), and every 5xx or transport failure, where nothing
+ * is proven: the write may well have committed before the answer was lost.
+ * Only a definite refusal lets a caller declare an intent finished.
+ */
+export function isDefiniteRefusal(err: unknown): boolean {
+  if (!(err instanceof ApiError) || isStillProcessing(err)) return false;
+  return err.status >= 400 && err.status < 500 && err.status !== 429;
+}
+
+export const STILL_SAVING_MESSAGE =
+  "Still saving — the server has not confirmed this yet, and it has not been repeated. It may still land. Trying again is safe: the same request cannot be applied twice.";
+
+/**
  * Fallback text for responses that carry no JSON body of our own.
  *
  * 429/502/503/504 are typically produced by the hosting layer in front of the
@@ -81,6 +139,33 @@ function retryDelayMs(attempt: number, res: Response): number {
 
 const MAX_RETRIES = 3;
 
+/**
+ * How long a keyed write keeps re-joining an original request the server says
+ * is still running.
+ *
+ * Re-sending the SAME key is not a retry in the risky sense: that request
+ * never performs the work, it waits on the one already in flight and is then
+ * answered from its record. So the only cost of joining again is time, and the
+ * payoff is the real outcome instead of a false failure — which is how the
+ * caller settles rather than being told to go and check the page.
+ *
+ * The budget is wall-clock rather than a count because the server blocks for
+ * up to 15 s on each join: what matters is how long we are willing to wait on
+ * one write, not how many round trips that takes. It is deliberately a ceiling
+ * someone can sit through — a write still unfinished past it is pathological,
+ * and the caller is told it is unconfirmed rather than left hanging.
+ */
+const IN_FLIGHT_JOIN_BUDGET_MS = 45_000;
+
+/**
+ * Pause before re-joining, so a write finishing right now is not raced, backing
+ * off to a ceiling: when the server answers instantly (its own wait already
+ * over) this stops us spinning through the budget in a burst of requests.
+ */
+function inFlightJoinDelayMs(join: number): number {
+  return Math.min(500 * Math.pow(2, join), 5_000);
+}
+
 let _unauthorizedHandler: (() => void) | null = null;
 
 /**
@@ -130,15 +215,16 @@ export async function fetchWithAuth(
 
 export async function api<T = unknown>(
   path: string,
-  init: Omit<RequestInit, "body"> & { body?: unknown } = {},
+  init: Omit<RequestInit, "body"> & { body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
-  const { body, headers: rawHeaders, ...rest } = init;
+  const { body, headers: rawHeaders, idempotencyKey, ...rest } = init;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((rawHeaders as Record<string, string>) ?? {}),
   };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (idempotencyKey) headers[IDEMPOTENCY_HEADER] = idempotencyKey;
 
   const serializedBody =
     body === undefined || body === null
@@ -150,13 +236,28 @@ export async function api<T = unknown>(
   // Only retry safe (read-only) methods. POST/PUT/PATCH/DELETE responses with
   // 502/503 do not guarantee the mutation was not processed; retrying could
   // duplicate server-side actions.
-  const canRetry = isSafeMethod(rest.method);
+  //
+  // A write that carries an idempotency key is the exception: the server
+  // replays the outcome it already recorded for that key, so a retry either
+  // repeats the first attempt's answer or performs work the first attempt
+  // never got to. That is the whole point of the key, so honour it here —
+  // it is what makes a request interrupted by a restart or a cold start
+  // recoverable without asking the user to go and check the page.
+  const canRetry = isSafeMethod(rest.method) || Boolean(idempotencyKey);
 
   let res!: Response;
   let text = "";
   let data: unknown = null;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  // Two independent budgets: transient hosting-layer rejections (which say
+  // nothing happened) and joins onto a write the server is still running
+  // (which say something IS happening). Waiting out the second must not eat
+  // the allowance for the first.
+  let transientAttempts = 0;
+  let inFlightJoins = 0;
+  let joinDeadline = 0;
+
+  for (;;) {
     res = await fetch(`/api${path}`, {
       ...rest,
       headers,
@@ -175,9 +276,26 @@ export async function api<T = unknown>(
       break;
     }
 
-    if (!canRetry || !isRetryableStatus(res.status) || attempt === MAX_RETRIES) break;
+    // An identical keyed write is still running server-side. Go back and wait
+    // on it: that request performs nothing, it is answered from the original's
+    // record, so this settles on the real outcome instead of reporting a
+    // failure for something that is mid-save.
+    const stillProcessing =
+      res.status === 409 &&
+      (data as { code?: unknown } | null)?.code === IDEMPOTENT_IN_FLIGHT_CODE;
+    if (stillProcessing) {
+      if (!idempotencyKey) break;
+      if (joinDeadline === 0) joinDeadline = Date.now() + IN_FLIGHT_JOIN_BUDGET_MS;
+      if (Date.now() >= joinDeadline) break;
+      await new Promise((r) => setTimeout(r, inFlightJoinDelayMs(inFlightJoins)));
+      inFlightJoins += 1;
+      continue;
+    }
 
-    await new Promise((r) => setTimeout(r, retryDelayMs(attempt, res)));
+    if (!canRetry || !isRetryableStatus(res.status) || transientAttempts >= MAX_RETRIES) break;
+
+    await new Promise((r) => setTimeout(r, retryDelayMs(transientAttempts, res)));
+    transientAttempts += 1;
   }
 
   if (!res.ok) {

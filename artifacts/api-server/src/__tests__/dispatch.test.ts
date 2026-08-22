@@ -290,6 +290,286 @@ describe("dispatch status-board bucketing", () => {
       expect(buckets.length, `shift ${sid} in exactly one bucket`).toBe(1);
     }
   });
+
+  it("flags onDuty entries left open well past their shift or (shift-less) far too long as stuck", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+
+    // Earlier tests in this file may have left an open entry for these
+    // officers; clear it so this test's own open entries are unambiguous.
+    await db.delete(timeEntriesTable).where(sql`
+      ${timeEntriesTable.employeeId} IN (${ctx.employeeId}, ${ctx.employee2Id})
+      AND ${timeEntriesTable.clockOutTime} IS NULL
+    `);
+
+    // Genuinely stuck: shift ended 5h ago (> STUCK_SHIFT_GRACE_HOURS=2), still open.
+    const stuckShift = await insertShift({
+      title: `${TAG}-stuck-shift`,
+      start: new Date(now - 9 * HOUR),
+      end: new Date(now - 5 * HOUR),
+    });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: stuckShift, employeeId: ctx.employeeId, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: stuckShift, employeeId: ctx.employeeId, clockInTime: new Date(now - 9 * HOUR),
+    });
+
+    // Not (yet) stuck: shift ended 30 min ago, well within the grace window.
+    const freshShift = await insertShift({
+      title: `${TAG}-fresh-shift`,
+      start: new Date(now - 4 * HOUR),
+      end: new Date(now - 30 * 60 * 1000),
+    });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: freshShift, employeeId: ctx.employee2Id, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: freshShift, employeeId: ctx.employee2Id, clockInTime: new Date(now - 4 * HOUR),
+    });
+
+    const res = await request(app)
+      .get("/api/dispatch/status-board")
+      .set(authed(ctx.dispatcherToken));
+    expect(res.status).toBe(200);
+    const onDuty = res.body.onDuty as Array<{ shiftId: string; stuck: boolean; hoursOpen: number }>;
+
+    const stuckRow = onDuty.find((r) => r.shiftId === stuckShift);
+    expect(stuckRow?.stuck, "shift ended 5h ago is stuck").toBe(true);
+    expect(stuckRow?.hoursOpen).toBeGreaterThanOrEqual(8.9);
+
+    const freshRow = onDuty.find((r) => r.shiftId === freshShift);
+    expect(freshRow?.stuck, "shift ended 30min ago is not yet stuck").toBe(false);
+  });
+
+  it("derives the stuck threshold from each site's own auto-clock-out policy, not a fixed grace window", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+
+    const longDelayEmployee = await makeUser("employee");
+    const disabledSiteEmployee = await makeUser("employee");
+
+    // Site configured with a 4h auto-clock-out delay (well above the
+    // default). An entry 3h past shift end is still WITHIN that site's own
+    // policy window and must never be flagged stuck.
+    const [longDelaySite] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-long-delay-site`,
+        address: "200 Test Way",
+        autoClockOutEnabled: true,
+        autoClockOutDelayMinutes: 240,
+      })
+      .returning({ id: sitesTable.id });
+
+    const longDelayShift = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG}-long-delay-shift`,
+        siteId: longDelaySite.id,
+        startTime: new Date(now - 7 * HOUR),
+        endTime: new Date(now - 3 * HOUR),
+        requiredLicenseLevel: 2,
+        headcount: 1,
+        status: "upcoming",
+      })
+      .returning({ id: shiftsTable.id })
+      .then((rows) => rows[0].id);
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: longDelayShift, employeeId: longDelayEmployee, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: longDelayShift, employeeId: longDelayEmployee, clockInTime: new Date(now - 7 * HOUR),
+    });
+
+    // Site with auto-clock-out DISABLED entirely: the background sweep never
+    // touches it (see autoClockOutEnabled === false early-continue), so this
+    // manual flag is the only backstop. 3h past shift end must NOT be
+    // flagged (no policy deadline ever applied), but a genuinely
+    // long-abandoned entry (past STUCK_DISABLED_SITE_HOURS) must still be.
+    const [disabledSite] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-disabled-site`,
+        address: "300 Test Way",
+        autoClockOutEnabled: false,
+      })
+      .returning({ id: sitesTable.id });
+
+    const disabledSiteShift = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG}-disabled-site-shift`,
+        siteId: disabledSite.id,
+        startTime: new Date(now - 20 * HOUR),
+        endTime: new Date(now - 3 * HOUR),
+        requiredLicenseLevel: 2,
+        headcount: 1,
+        status: "upcoming",
+      })
+      .returning({ id: shiftsTable.id })
+      .then((rows) => rows[0].id);
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: disabledSiteShift, employeeId: disabledSiteEmployee, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: disabledSiteShift, employeeId: disabledSiteEmployee, clockInTime: new Date(now - 20 * HOUR),
+    });
+
+    const res = await request(app)
+      .get("/api/dispatch/status-board")
+      .set(authed(ctx.dispatcherToken));
+    expect(res.status).toBe(200);
+    const onDuty = res.body.onDuty as Array<{ shiftId: string; stuck: boolean }>;
+
+    const longDelayRow = onDuty.find((r) => r.shiftId === longDelayShift);
+    expect(
+      longDelayRow?.stuck,
+      "3h past shift end is still inside this site's own 4h auto-clock-out delay",
+    ).toBe(false);
+
+    const disabledRow = onDuty.find((r) => r.shiftId === disabledSiteShift);
+    expect(
+      disabledRow?.stuck,
+      "auto-clock-out disabled site has no policy deadline, but 20h open exceeds the flat backstop",
+    ).toBe(true);
+  });
+
+  it("resolves the policy site the same way autoClockOutEndedShifts does — the entry's own siteId wins over its shift's", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const mismatchEmployee = await makeUser("employee");
+
+    // Shift's site: short delay. If the stuck flag wrongly preferred the
+    // shift's site (instead of matching the sweep job's own
+    // coalesce(entrySiteId, shiftSiteId) precedence), 3h past shift end
+    // would already be well past this site's deadline and get flagged.
+    const [shortDelaySite] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-mismatch-shift-site`,
+        address: "400 Test Way",
+        autoClockOutEnabled: true,
+        autoClockOutDelayMinutes: 30,
+      })
+      .returning({ id: sitesTable.id });
+
+    // Entry's own site (e.g. an ad-hoc clock-in recorded at a different site
+    // than the shift it's linked to): long delay. The real sweep job would
+    // resolve THIS site's policy, so the entry must still be within it.
+    const [longDelaySite] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-mismatch-entry-site`,
+        address: "500 Test Way",
+        autoClockOutEnabled: true,
+        autoClockOutDelayMinutes: 240,
+      })
+      .returning({ id: sitesTable.id });
+
+    const mismatchShift = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG}-mismatch-shift`,
+        siteId: shortDelaySite.id,
+        startTime: new Date(now - 7 * HOUR),
+        endTime: new Date(now - 3 * HOUR),
+        requiredLicenseLevel: 2,
+        headcount: 1,
+        status: "upcoming",
+      })
+      .returning({ id: shiftsTable.id })
+      .then((rows) => rows[0].id);
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: mismatchShift, employeeId: mismatchEmployee, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: mismatchShift,
+      employeeId: mismatchEmployee,
+      siteId: longDelaySite.id,
+      clockInTime: new Date(now - 7 * HOUR),
+    });
+
+    const res = await request(app)
+      .get("/api/dispatch/status-board")
+      .set(authed(ctx.dispatcherToken));
+    expect(res.status).toBe(200);
+    const onDuty = res.body.onDuty as Array<{ shiftId: string; stuck: boolean }>;
+
+    const mismatchRow = onDuty.find((r) => r.shiftId === mismatchShift);
+    expect(
+      mismatchRow?.stuck,
+      "3h past shift end is within the ENTRY's own site's 4h delay, even though the shift's site has only a 30min delay",
+    ).toBe(false);
+  });
+
+  it("never flags an entry with a fresh on-site geofence ping, matching the sweep job's own exclusion", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const MIN = 60 * 1000;
+
+    const freshInsideEmployee = await makeUser("employee");
+    const staleInsideEmployee = await makeUser("employee");
+
+    // Well past the default policy deadline for both — timing alone would
+    // flag these as stuck.
+    const freshInsideShift = await insertShift({
+      title: `${TAG}-fresh-inside-shift`,
+      start: new Date(now - 9 * HOUR),
+      end: new Date(now - 5 * HOUR),
+    });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: freshInsideShift, employeeId: freshInsideEmployee, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: freshInsideShift,
+      employeeId: freshInsideEmployee,
+      clockInTime: new Date(now - 9 * HOUR),
+      geofenceState: "inside",
+    });
+    // Fresh ping (well within GEOFENCE_FRESH_MS = 15min) — proof the officer
+    // is demonstrably still on site right now.
+    await db.update(usersTable)
+      .set({ lastLat: "30.000000", lastLng: "-97.000000", lastLocationAt: new Date(now - 2 * MIN) })
+      .where(sql`${usersTable.id} = ${freshInsideEmployee}`);
+
+    const staleInsideShift = await insertShift({
+      title: `${TAG}-stale-inside-shift`,
+      start: new Date(now - 9 * HOUR),
+      end: new Date(now - 5 * HOUR),
+    });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: staleInsideShift, employeeId: staleInsideEmployee, status: "accepted",
+    });
+    await db.insert(timeEntriesTable).values({
+      shiftId: staleInsideShift,
+      employeeId: staleInsideEmployee,
+      clockInTime: new Date(now - 9 * HOUR),
+      geofenceState: "inside",
+    });
+    // "inside" but the location ping itself is stale (past GEOFENCE_FRESH_MS)
+    // — not proof of anything right now, so the timing policy still governs
+    // and this one MUST still be flagged.
+    await db.update(usersTable)
+      .set({ lastLat: "30.000000", lastLng: "-97.000000", lastLocationAt: new Date(now - 3 * HOUR) })
+      .where(sql`${usersTable.id} = ${staleInsideEmployee}`);
+
+    const res = await request(app)
+      .get("/api/dispatch/status-board")
+      .set(authed(ctx.dispatcherToken));
+    expect(res.status).toBe(200);
+    const onDuty = res.body.onDuty as Array<{ shiftId: string; stuck: boolean }>;
+
+    const freshRow = onDuty.find((r) => r.shiftId === freshInsideShift);
+    expect(freshRow?.stuck, "fresh 'inside' ping is proof of life, never stuck").toBe(false);
+
+    const staleRow = onDuty.find((r) => r.shiftId === staleInsideShift);
+    expect(staleRow?.stuck, "stale 'inside' ping is not current proof, timing policy governs").toBe(true);
+  });
 });
 
 describe("dispatch assign-nearest headcount race", () => {

@@ -27,6 +27,7 @@ import {
   getClockOutReminderPlan,
   getClockOutReminderMessage,
   sendForgotClockOutReminders,
+  notifyStuckOpenShifts,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -1068,6 +1069,205 @@ describe("autoClockOutEndedShifts", () => {
     const entry = await readEntry(entryId);
     expect(Number(entry.hoursWorked)).toBe(36);
     expect(entry.notes).toContain("Duration capped at 36h");
+  });
+});
+
+describe("notifyStuckOpenShifts", () => {
+  const STAG = `${TAG}-stuck`;
+  const HOUR = 60 * 60 * 1000;
+  let clientId: string;
+  let siteId: string;
+  const adminIds: string[] = [];
+  const extraSiteIds: string[] = [];
+
+  async function makeAdmin(suffix: string): Promise<string> {
+    const [row] = await db
+      .insert(usersTable)
+      .values({
+        email: `${STAG}-${suffix}-${randomUUID().slice(0, 6)}@example.test`,
+        passwordHash,
+        firstName: "Admin",
+        lastName: suffix,
+        role: "admin",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    adminIds.push(row.id);
+    return row.id;
+  }
+
+  async function makeShift(suffix: string, startTime: Date, endTime: Date, atSiteId?: string): Promise<string> {
+    const [row] = await db
+      .insert(shiftsTable)
+      .values({ title: `${STAG}-shift-${suffix}`, siteId: atSiteId ?? siteId, startTime, endTime, status: "active" })
+      .returning({ id: shiftsTable.id });
+    return row.id;
+  }
+
+  async function makeOpenEntry(
+    employeeId: string,
+    shiftId: string | null,
+    clockIn: Date,
+    opts?: { atSiteId?: string; stuckShiftNotifiedAt?: Date | null },
+  ): Promise<string> {
+    const [row] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId,
+        shiftId,
+        siteId: opts?.atSiteId ?? siteId,
+        clockInTime: clockIn,
+        clockOutTime: null,
+        notes: STAG,
+        stuckShiftNotifiedAt: opts?.stuckShiftNotifiedAt ?? null,
+      })
+      .returning({ id: timeEntriesTable.id });
+    return row.id;
+  }
+
+  async function makeDisabledSite(suffix: string): Promise<string> {
+    const [s] = await db
+      .insert(sitesTable)
+      .values({
+        name: `${STAG}-${suffix}`,
+        address: "1 Test Way",
+        clientId,
+        autoClockOutEnabled: false,
+      })
+      .returning({ id: sitesTable.id });
+    extraSiteIds.push(s.id);
+    return s.id;
+  }
+
+  async function readStamp(id: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ stuckShiftNotifiedAt: timeEntriesTable.stuckShiftNotifiedAt })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, id))
+      .limit(1);
+    return row.stuckShiftNotifiedAt;
+  }
+
+  beforeAll(async () => {
+    const [c] = await db
+      .insert(clientsTable)
+      .values({ name: `${STAG}-client` })
+      .returning({ id: clientsTable.id });
+    clientId = c.id;
+    const [s] = await db
+      .insert(sitesTable)
+      .values({ name: `${STAG}-location`, address: "1 Test Way", clientId: c.id })
+      .returning({ id: sitesTable.id });
+    siteId = s.id;
+    await makeAdmin("one");
+  });
+
+  afterAll(async () => {
+    const ids = [siteId, ...extraSiteIds];
+    for (const id of ids) {
+      await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${id}`);
+      await db.execute(sql`DELETE FROM shifts WHERE site_id = ${id}`);
+      await db.execute(sql`DELETE FROM sites WHERE id = ${id}`);
+    }
+    await db.execute(sql`DELETE FROM clients WHERE name = ${`${STAG}-client`}`);
+    for (const id of adminIds) {
+      await db.delete(usersTable).where(eq(usersTable.id, id));
+    }
+  });
+
+  it("stamps a shift-linked entry once it's past its site's auto-clock-out deadline plus the sweep buffer", async () => {
+    const now = Date.now();
+    // Shift ended 2h ago; default company delay + buffer is well under that,
+    // so the sweep should have already closed this — flag it as stuck.
+    const emp = await makeActiveEmployee("stuck-shift");
+    const end = new Date(now - 2 * HOUR);
+    const shift = await makeShift("stuck", new Date(now - 10 * HOUR), end);
+    const entryId = await makeOpenEntry(emp, shift, new Date(now - 10 * HOUR));
+
+    await notifyStuckOpenShifts();
+
+    const stamp = await readStamp(entryId);
+    expect(stamp).not.toBeNull();
+  });
+
+  it("leaves a not-yet-stuck entry alone", async () => {
+    const now = Date.now();
+    // Shift ends 5 minutes from now — nowhere near stuck.
+    const emp = await makeActiveEmployee("stuck-fresh");
+    const shift = await makeShift("fresh", new Date(now - 1 * HOUR), new Date(now + 5 * 60 * 1000));
+    const entryId = await makeOpenEntry(emp, shift, new Date(now - 1 * HOUR));
+
+    await notifyStuckOpenShifts();
+
+    expect(await readStamp(entryId)).toBeNull();
+  });
+
+  it("flags a disabled-auto-clock-out site once it passes the flat 16h backstop", async () => {
+    const now = Date.now();
+    const offSite = await makeDisabledSite("off");
+
+    const stuckEmp = await makeActiveEmployee("stuck-off-late");
+    const stuckEntry = await makeOpenEntry(stuckEmp, null, new Date(now - 17 * HOUR), { atSiteId: offSite });
+
+    const notYetEmp = await makeActiveEmployee("stuck-off-early");
+    const notYetEntry = await makeOpenEntry(notYetEmp, null, new Date(now - 10 * HOUR), { atSiteId: offSite });
+
+    await notifyStuckOpenShifts();
+
+    expect(await readStamp(stuckEntry)).not.toBeNull();
+    expect(await readStamp(notYetEntry)).toBeNull();
+  });
+
+  it("does not re-stamp (or re-page) an already-notified entry within the same day", async () => {
+    const now = Date.now();
+    const emp = await makeActiveEmployee("stuck-debounce");
+    const end = new Date(now - 2 * HOUR);
+    const shift = await makeShift("debounce", new Date(now - 10 * HOUR), end);
+    const entryId = await makeOpenEntry(emp, shift, new Date(now - 10 * HOUR));
+
+    await notifyStuckOpenShifts();
+    const firstStamp = await readStamp(entryId);
+    expect(firstStamp).not.toBeNull();
+
+    await notifyStuckOpenShifts();
+    const secondStamp = await readStamp(entryId);
+    expect(secondStamp?.getTime()).toBe(firstStamp?.getTime());
+  });
+
+  it("re-notifies a still-stuck entry once the previous alert is more than a day old", async () => {
+    const now = Date.now();
+    const emp = await makeActiveEmployee("stuck-renotify");
+    const end = new Date(now - 2 * HOUR);
+    const shift = await makeShift("renotify", new Date(now - 10 * HOUR), end);
+    const oldStamp = new Date(now - 25 * HOUR);
+    const entryId = await makeOpenEntry(emp, shift, new Date(now - 30 * HOUR), { stuckShiftNotifiedAt: oldStamp });
+
+    await notifyStuckOpenShifts();
+
+    const stamp = await readStamp(entryId);
+    expect(stamp).not.toBeNull();
+    expect(stamp!.getTime()).toBeGreaterThan(oldStamp.getTime());
+  });
+
+  it("never stamps an entry that already has a fresh on-site geofence ping", async () => {
+    const now = Date.now();
+    const emp = await makeActiveEmployee("stuck-onsite");
+    const end = new Date(now - 2 * HOUR);
+    const shift = await makeShift("onsite", new Date(now - 10 * HOUR), end);
+    const entryId = await makeOpenEntry(emp, shift, new Date(now - 10 * HOUR));
+    await db
+      .update(timeEntriesTable)
+      .set({ geofenceState: "inside" })
+      .where(eq(timeEntriesTable.id, entryId));
+    await db
+      .update(usersTable)
+      .set({ lastLocationAt: new Date() })
+      .where(eq(usersTable.id, emp));
+
+    await notifyStuckOpenShifts();
+
+    expect(await readStamp(entryId)).toBeNull();
   });
 });
 

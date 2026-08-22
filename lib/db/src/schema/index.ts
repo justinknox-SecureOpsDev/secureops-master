@@ -58,3 +58,5 @@ export * from "./protectionDestinations";
 export * from "./featureFlags";
 export * from "./companyOwnerRollout";
 export * from "./permissionOverrides";
+export * from "./assistantSuggestionDismissals";
+export * from "./idempotencyKeys";

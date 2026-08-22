@@ -11,6 +11,7 @@ import { requirePermission } from "../lib/permissions";
 // Per-site scope (canManageSite / assertCanManageTimeEntry) is still
 // enforced inside each handler below — this only replaces the outer role gate.
 const requireTimeAttendanceManage = [requireAuth, requirePermission("timeAttendance.manage")] as const;
+import { idempotentWrite } from "../lib/idempotency";
 import { upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
@@ -31,6 +32,15 @@ const router: IRouter = Router();
 function calcHours(clockIn: Date, clockOut: Date): number {
   return Math.round(((clockOut.getTime() - clockIn.getTime()) / 3600000) * 100) / 100;
 }
+
+// Shown whenever a clock-in is blocked by an already-open entry (normal
+// double-tap OR a stale entry left open from a crash/forgotten clock-out).
+// The DB only allows one open entry per officer, so once one is stuck the
+// officer has no self-service way to clear it — this message points them at
+// the fix (an admin closing the old entry, e.g. from the Dispatch board's
+// "stuck" flag) instead of leaving them to guess or call support.
+const ALREADY_CLOCKED_IN_MESSAGE =
+  "You already have an open shift. If that's from an earlier session and won't close, ask an admin to close it before you clock in again.";
 
 const SHIFT_MATCH_GRACE_MS = 60 * 60 * 1000;
 
@@ -567,7 +577,7 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)));
 
   if (existing.length > 0) {
-    res.status(400).json({ error: "Bad Request", message: "Already clocked in" });
+    res.status(400).json({ error: "Bad Request", message: ALREADY_CLOCKED_IN_MESSAGE });
     return;
   }
 
@@ -734,7 +744,7 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
   // re-check under that lock before creating the entry. The partial unique
   // index (one open entry per employee) is the database-level backstop: if a
   // writer ever slips past this lock, the insert raises 23505 and we translate
-  // it into the SAME "Already clocked in" reply the in-transaction check gives.
+  // it into the SAME already-clocked-in reply the in-transaction check gives.
   let outcome: { conflict: true } | { entry: typeof timeEntriesTable.$inferSelect };
   try {
     outcome = await db.transaction(async (tx) => {
@@ -766,7 +776,7 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
   }
 
   if ("conflict" in outcome) {
-    res.status(400).json({ error: "Bad Request", message: "Already clocked in" });
+    res.status(400).json({ error: "Bad Request", message: ALREADY_CLOCKED_IN_MESSAGE });
     return;
   }
   const { entry } = outcome;
@@ -1474,6 +1484,14 @@ router.patch("/time-entries/:id/clock-out", ...requireTimeAttendanceManage, asyn
   }
 
   let targetClockOut: Date | null = null;
+  // Set when useShiftEnd could not snap to the shift's scheduled end because
+  // the clock-in itself was at/after that end (a late walk-up clocked in on
+  // top of an already-ended shift, or a data anomaly) — there is no sane
+  // "shift end" to close at. Mirrors autoClockOutEndedShifts' own now()
+  // fallback for exactly this case (see computeAutoClockOut in
+  // scheduledJobs.ts): rather than reject the close entirely and leave the
+  // admin with the same unusable stuck record, close at the time of action.
+  let shiftEndFallbackToNow = false;
   if (useShiftEnd) {
     if (!existing.shiftId) {
       res.status(400).json({
@@ -1487,7 +1505,12 @@ router.patch("/time-entries/:id/clock-out", ...requireTimeAttendanceManage, asyn
       res.status(400).json({ error: "Bad Request", message: "Linked shift no longer exists." });
       return;
     }
-    targetClockOut = shift.endTime;
+    if (shift.endTime.getTime() > existing.clockInTime.getTime()) {
+      targetClockOut = shift.endTime;
+    } else {
+      targetClockOut = new Date();
+      shiftEndFallbackToNow = true;
+    }
   } else if (clockOutTime) {
     const parsed = new Date(clockOutTime);
     if (isNaN(parsed.getTime())) {
@@ -1510,12 +1533,21 @@ router.patch("/time-entries/:id/clock-out", ...requireTimeAttendanceManage, asyn
 
   const hours = calcHours(existing.clockInTime, targetClockOut);
 
+  // When we silently fell back from "shift end" to "now" (see above),
+  // record that on the entry itself so the correction is visible in the
+  // grid, not just in the audit-history diff.
+  const fallbackNote = shiftEndFallbackToNow
+    ? "Closed at time of action — clock-in was on/after the shift's scheduled end, so there was no valid shift-end time to snap to."
+    : null;
+  const resolvedNotes = notes
+    ?? (fallbackNote ? [existing.notes, fallbackNote].filter(Boolean).join(" | ") : existing.notes);
+
   // Reset syncSource so admin force-clock-outs of scheduler-origin entries propagate back.
   // Stamp last-edited provenance so reviewers can see this was admin-corrected.
   const [updated] = await db.update(timeEntriesTable).set({
     clockOutTime: targetClockOut,
     hoursWorked: String(hours),
-    notes: notes ?? existing.notes,
+    notes: resolvedNotes,
     syncSource: "local",
     lastEditedByUserId: req.user!.userId,
     lastEditedByEmail: req.user!.email,
@@ -1856,7 +1888,12 @@ router.post("/time-entries/:id/dismiss-correction", requireAdmin, async (req, re
 });
 
 // Admin or site manager approves/rejects a time entry. Approval is required before payroll/invoice picks it up.
-router.post("/time-entries/:id/approve", ...requireTimeAttendanceManage, async (req, res): Promise<void> => {
+// `idempotentWrite`: approval releases the hours to payroll and to the client
+// invoice. A caller whose answer was lost must be able to find out what
+// happened without guessing — an Idempotency-Key makes the retry replay the
+// original decision (same approvedAt, same invoice roll-up) instead of
+// re-running it. Absent a key nothing changes. See lib/idempotency.ts.
+router.post("/time-entries/:id/approve", ...requireTimeAttendanceManage, idempotentWrite, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { decision, hoursWorked, notes } = req.body;
   if (decision !== "approved" && decision !== "rejected") {
@@ -1885,42 +1922,122 @@ router.post("/time-entries/:id/approve", ...requireTimeAttendanceManage, async (
     }
   }
 
-  const updates: Record<string, unknown> = {
-    approvalStatus: decision,
-    approvedAt: new Date(),
-    approvedBy: req.user!.userId,
-    isVerified: decision === "approved",
+  type TimeEntryRow = typeof timeEntriesTable.$inferSelect;
+
+  const respondWith = async (row: TimeEntryRow): Promise<void> => {
+    const [shift] = row.shiftId
+      ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, row.shiftId))
+      : [undefined];
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, row.employeeId));
+    res.json({
+      ...row,
+      shiftTitle: shift?.title,
+      employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+    });
   };
-  if (hoursWorked !== undefined) updates.hoursWorked = String(hoursWorked);
-  if (notes !== undefined) updates.notes = notes;
-  // Admin action on an unconfirmed entry force-clears the awaiting state —
-  // an officer who never confirms cannot block payroll. Original recorded
-  // times stay preserved on the row.
-  if (existing.confirmationStatus === "awaiting_confirmation") {
-    updates.confirmationStatus = "confirmed";
+
+  // Re-deciding a row into the state it is already in is not a decision. Left
+  // to run, it would re-stamp approvedAt and roll the same hours into payroll
+  // and the client invoice a second time. The key above covers a retry that
+  // arrives while the caller still holds it; this covers the same press
+  // arriving after that — a list that still reads "Pending" (a stale refresh,
+  // a second admin's tab, a phone that was offline) invites exactly that, and
+  // none of it is new intent. Anything that WOULD change the row — different
+  // decision, corrected hours, an edited note, an entry still awaiting the
+  // officer's confirmation — is a real transition and still runs.
+  const alreadyDecidedThisWay = (row: TimeEntryRow): boolean => {
+    const hoursUnchanged =
+      hoursWorked === undefined ||
+      (row.hoursWorked !== null && Number(hoursWorked) === Number(row.hoursWorked));
+    return (
+      row.approvalStatus === decision &&
+      row.isVerified === (decision === "approved") &&
+      row.confirmationStatus !== "awaiting_confirmation" &&
+      hoursUnchanged &&
+      (notes === undefined || notes === row.notes)
+    );
+  };
+
+  // Two requests can clear that check at the same instant — a double-click
+  // that outran the key window, two admins on the same list — so the check
+  // alone is not the guard. The write below is the guard: it only lands if
+  // the row is still in the state we read (approvalStatus + approvedAt, which
+  // every decision re-stamps and so acts as the row's version). The loser
+  // updates nothing, re-reads, and answers from the winner's row without
+  // touching payroll or the invoice.
+  let current: TimeEntryRow = existing;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      const [reread] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+      if (!reread) { res.status(404).json({ error: "Not Found" }); return; }
+      current = reread;
+    }
+
+    if (alreadyDecidedThisWay(current)) {
+      // The audit log records writes, and this request performs none. Saying so
+      // keeps the row from reading as a second sign-off on the same hours.
+      res.locals["auditMetadata"] = {
+        ...((res.locals["auditMetadata"] as Record<string, unknown> | undefined) ?? {}),
+        duplicateDecision: true,
+      };
+      await respondWith(current);
+      return;
+    }
+
+    const updates: Record<string, unknown> = {
+      approvalStatus: decision,
+      approvedAt: new Date(),
+      approvedBy: req.user!.userId,
+      isVerified: decision === "approved",
+    };
+    if (hoursWorked !== undefined) updates.hoursWorked = String(hoursWorked);
+    if (notes !== undefined) updates.notes = notes;
+    // Admin action on an unconfirmed entry force-clears the awaiting state —
+    // an officer who never confirms cannot block payroll. Original recorded
+    // times stay preserved on the row.
+    if (current.confirmationStatus === "awaiting_confirmation") {
+      updates.confirmationStatus = "confirmed";
+    }
+
+    const claimed = await db
+      .update(timeEntriesTable)
+      .set(updates)
+      .where(
+        and(
+          eq(timeEntriesTable.id, id),
+          eq(timeEntriesTable.approvalStatus, current.approvalStatus),
+          current.approvedAt === null
+            ? isNull(timeEntriesTable.approvedAt)
+            : eq(timeEntriesTable.approvedAt, current.approvedAt),
+        ),
+      )
+      .returning();
+    // Somebody else decided this entry between our read and our write.
+    if (claimed.length === 0) continue;
+
+    const updated = claimed[0];
+
+    // Auto-populate the per-site weekly client invoice. Approval is the
+    // only state that bills the client, so on "approved" we fold this
+    // entry into the (siteId, week-of-clockIn) draft. On "rejected" we
+    // also re-sync — if the entry was previously approved and rolled
+    // into a draft, the rebuild will drop its line and (if it was the
+    // only billable entry) prune the now-empty $0 draft. Best-effort:
+    // the response status doesn't depend on the invoice write. Only the
+    // request that actually moved the row gets here.
+    if (decision === "approved" || decision === "rejected") {
+      void upsertWeeklyInvoiceForTimeEntry(updated);
+    }
+
+    await respondWith(updated);
+    return;
   }
 
-  const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
-  const [shift] = updated.shiftId
-    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
-    : [undefined];
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
-
-  // Auto-populate the per-site weekly client invoice. Approval is the
-  // only state that bills the client, so on "approved" we fold this
-  // entry into the (siteId, week-of-clockIn) draft. On "rejected" we
-  // also re-sync — if the entry was previously approved and rolled
-  // into a draft, the rebuild will drop its line and (if it was the
-  // only billable entry) prune the now-empty $0 draft. Best-effort:
-  // the response status doesn't depend on the invoice write.
-  if (decision === "approved" || decision === "rejected") {
-    void upsertWeeklyInvoiceForTimeEntry(updated);
-  }
-
-  res.json({
-    ...updated,
-    shiftTitle: shift?.title,
-    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  // Lost the claim twice and the row still isn't in the state we asked for —
+  // somebody is actively editing it. Better to say so than to overwrite them.
+  res.status(409).json({
+    error: "Conflict",
+    message: "This time entry changed while your decision was being applied. Reload and decide again.",
   });
 });
 

@@ -208,6 +208,34 @@ describe("POST /shifts/bulk-create — multi-position one-off shifts", () => {
     const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.managerToken)).send(body({ siteId: null }));
     expect(res.status).toBe(400);
   });
+
+  it("answers a repeated submit from the record instead of creating the shifts twice", async () => {
+    // The portal's "New shift" dialog mints one key per save intent, so a
+    // double-click — or a retry of a save whose answer was lost — arrives
+    // here under the key the first attempt used.
+    const title = `${TAG}-idem`;
+    const key = `intent-${randomUUID()}`;
+    const payload = body({ title });
+
+    const first = await request(app)
+      .post("/api/shifts/bulk-create")
+      .set(authed(ctx.adminToken))
+      .set("Idempotency-Key", key)
+      .send(payload);
+    const second = await request(app)
+      .post("/api/shifts/bulk-create")
+      .set(authed(ctx.adminToken))
+      .set("Idempotency-Key", key)
+      .send(payload);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.headers["x-idempotent-replay"]).toBe("true");
+    expect(second.body).toEqual(first.body);
+
+    const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
+    expect(rows).toHaveLength(2); // the two positions, once — not four rows
+  });
 });
 
 describe("POST /shifts/repeat — multi-position series", () => {

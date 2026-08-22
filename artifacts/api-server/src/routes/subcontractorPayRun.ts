@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db, subcontractorInvoicesTable, subcontractorsTable } from "@workspace/db";
 import { requireAdmin, requireCompanyOwner } from "../middlewares/auth";
+import { idempotentWrite } from "../lib/idempotency";
 
 const router: IRouter = Router();
 
@@ -188,7 +189,12 @@ router.post("/subcontractor-pay-run/export-csv", requireCompanyOwner, async (req
   res.status(200).send(csv);
 });
 
-router.post("/subcontractor-pay-run/mark-paid", requireAdmin, async (req, res): Promise<void> => {
+// Replay protection: a caller may supply an `idempotencyKey` (body field or
+// `idempotency-key` header). A duplicate submission under the same key is
+// answered from the first attempt's response instead of re-running the
+// UPDATE — see lib/idempotency.ts. Optional and additive: callers that don't
+// send a key see no behaviour change.
+router.post("/subcontractor-pay-run/mark-paid", requireAdmin, idempotentWrite, async (req, res): Promise<void> => {
   const { ids, paymentReference, method } = req.body ?? {};
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" });

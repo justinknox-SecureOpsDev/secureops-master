@@ -187,6 +187,7 @@ export default function AdminLayout() {
           flat tab screens here (doing so reused a single instance and leaked
           an extra tab into the bar). */}
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
+      <Tabs.Screen name="chat/ai-bot" options={{ href: null, headerShown: false }} />
     </Tabs>
     </TourProvider>
   );
